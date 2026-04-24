@@ -72,7 +72,7 @@ struct CatchupAllCommand: AsyncCommand {
         source: String,
         body: String?
     ) async throws -> String {
-        let cleanBody = (body.map(stripTagsForBuild) ?? "").prefix(2000)
+        let cleanBody = (body.map(stripTags) ?? "").prefix(2000)
 
         let system = """
         You are a neutral news explainer for someone smart who hasn't been following the story. \
@@ -119,14 +119,4 @@ struct CatchupAllCommand: AsyncCommand {
     }
 }
 
-private func stripTagsForBuild(_ s: String) -> String {
-    let noTags = s.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
-    return noTags
-        .replacingOccurrences(of: "&amp;", with: "&")
-        .replacingOccurrences(of: "&lt;", with: "<")
-        .replacingOccurrences(of: "&gt;", with: ">")
-        .replacingOccurrences(of: "&quot;", with: "\"")
-        .replacingOccurrences(of: "&#39;", with: "'")
-        .replacingOccurrences(of: "&nbsp;", with: " ")
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-}
+// NOTE: stripTags (formerly stripTagsForBuild) lives in Helpers/HTMLHelpers.swift.

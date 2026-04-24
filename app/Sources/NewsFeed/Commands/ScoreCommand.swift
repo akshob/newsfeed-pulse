@@ -250,24 +250,4 @@ struct ScoreCommand: AsyncCommand {
     }
 }
 
-// Parse "[0.1,0.2,...]" back into [Double]
-private func parsePGVector(_ text: String) -> [Double]? {
-    let stripped = text.trimmingCharacters(in: CharacterSet(charactersIn: "[] \n\t"))
-    guard !stripped.isEmpty else { return nil }
-    let parts = stripped.split(separator: ",")
-    let doubles = parts.compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
-    return doubles.count == parts.count ? doubles : nil
-}
-
-// Quick HTML-tag strip for body content before embedding / previewing.
-private func stripTags(_ s: String) -> String {
-    let noTags = s.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
-    return noTags
-        .replacingOccurrences(of: "&amp;", with: "&")
-        .replacingOccurrences(of: "&lt;", with: "<")
-        .replacingOccurrences(of: "&gt;", with: ">")
-        .replacingOccurrences(of: "&quot;", with: "\"")
-        .replacingOccurrences(of: "&#39;", with: "'")
-        .replacingOccurrences(of: "&nbsp;", with: " ")
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-}
+// NOTE: parsePGVector moved to Helpers/VectorMath.swift; stripTags to Helpers/HTMLHelpers.swift.
