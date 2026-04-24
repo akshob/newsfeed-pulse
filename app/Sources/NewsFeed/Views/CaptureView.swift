@@ -9,14 +9,20 @@ enum CaptureView {
             default: return ""
             }
         }()
-        let emailTail = userEmail.map { " · <a href=\"/account\">\(htmlEscape($0))</a>" } ?? ""
         let body = """
         <main class="layout">
           <div class="list">
             <header>
-              <h1>capture</h1>
-              <div class="subtitle">Heard something? Drop it here — tomorrow's brief will surface what's relevant.</div>
-              <nav><a href="/">← feed</a>\(emailTail)</nav>
+              <div class="header-row">
+                <div>
+                  <h1>capture</h1>
+                  <div class="subtitle">Heard something? Drop it here — tomorrow's brief will surface what's relevant.</div>
+                </div>
+                \(avatarHTML(for: userEmail))
+              </div>
+              <nav class="btn-row">
+                <a class="btn-link" href="/">← feed</a>
+              </nav>
             </header>
             \(flash)
             <form method="POST" action="/capture" class="capture-form">

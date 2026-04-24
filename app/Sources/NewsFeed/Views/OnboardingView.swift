@@ -17,9 +17,16 @@ enum OnboardingView {
         <main class="layout">
           <div class="list">
             <header>
-              <h1>What's in your feed?</h1>
-              <div class="subtitle">Tick the categories that interest you — specifics in the blurb below are best. You can change this later from your account page.</div>
-              <nav><a href="/">← feed</a> · <a href="/account">\(htmlEscape(email))</a></nav>
+              <div class="header-row">
+                <div>
+                  <h1>What's in your feed?</h1>
+                  <div class="subtitle">Tick the categories that interest you — specifics in the blurb below are best. You can change this later from your account page.</div>
+                </div>
+                \(avatarHTML(for: email))
+              </div>
+              <nav class="btn-row">
+                <a class="btn-link" href="/">← feed</a>
+              </nav>
             </header>
             \(flash)
             <form method="POST" action="/onboarding" class="onboard-form">

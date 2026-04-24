@@ -11,11 +11,17 @@ enum FeedView {
         }()
         let header = """
         <header>
-          <h1>\(htmlEscape(title))</h1>
-          <div class="subtitle">\(items.count) items · \(scoredCount) scored</div>
-          <nav>
-            <a href="/">ranked</a> · <a href="/raw">raw</a> · <a href="/capture">+ capture</a>
-            <span class="user">· <a href="/account">\(htmlEscape(userEmail ?? ""))</a></span>
+          <div class="header-row">
+            <div>
+              <h1>\(htmlEscape(title))</h1>
+              <div class="subtitle">\(items.count) items · \(scoredCount) scored</div>
+            </div>
+            \(avatarHTML(for: userEmail))
+          </div>
+          <nav class="btn-row">
+            <a class="btn-link" href="/">ranked</a>
+            <a class="btn-link" href="/raw">raw</a>
+            <a class="btn-link" href="/capture">+ capture</a>
           </nav>
         </header>
         \(flash)

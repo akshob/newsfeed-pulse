@@ -5,7 +5,7 @@ enum CatchupView {
         let body = """
         <main class="layout single">
           <div class="list">
-            <header><nav><a href="/">← feed</a></nav></header>
+            <header><nav class="btn-row"><a class="btn-link" href="/">← feed</a></nav></header>
             \(renderFragment(item: item, score: score, explainerHTML: explainerHTML, standalone: true))
           </div>
         </main>
@@ -61,7 +61,7 @@ enum CatchupView {
         let body = """
         <main class="layout single">
           <div class="list">
-            <header><nav><a href="/">← feed</a></nav></header>
+            <header><nav class="btn-row"><a class="btn-link" href="/">← feed</a></nav></header>
             \(renderIframeFragment(item: item, score: score, standalone: true))
           </div>
         </main>

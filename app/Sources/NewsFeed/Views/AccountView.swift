@@ -15,9 +15,16 @@ enum AccountView {
         <main class="layout">
           <div class="list">
             <header>
-              <h1>Account</h1>
-              <div class="subtitle">Signed in as <strong>\(htmlEscape(email))</strong></div>
-              <nav><a href="/">← feed</a></nav>
+              <div class="header-row">
+                <div>
+                  <h1>Account</h1>
+                  <div class="subtitle">Signed in as <strong>\(htmlEscape(email))</strong></div>
+                </div>
+                <span class="avatar-link avatar-lg" aria-label="your avatar"><span class="avatar">\(identiconSVG(for: email, size: 64))</span></span>
+              </div>
+              <nav class="btn-row">
+                <a class="btn-link" href="/">← feed</a>
+              </nav>
             </header>
             \(flash)
 
