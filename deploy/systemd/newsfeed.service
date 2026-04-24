@@ -1,0 +1,26 @@
+[Unit]
+Description=NewsFeed (pulse.akshob.com) Vapor server
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=akshobg
+Group=akshobg
+WorkingDirectory=/mnt/butterscotch/newsfeed/app
+EnvironmentFile=/mnt/butterscotch/newsfeed/app/.env
+ExecStart=/mnt/butterscotch/newsfeed/app/.build/release/NewsFeed serve --hostname 127.0.0.1 --port 8080
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Basic hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/mnt/butterscotch/newsfeed
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

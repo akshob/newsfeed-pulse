@@ -1,0 +1,21 @@
+#!/bin/bash
+# /usr/local/bin/newsfeed-deploy — restart the newsfeed service after a new build.
+# Usage: sudo newsfeed-deploy
+set -e
+
+if [[ $EUID -ne 0 ]]; then
+  echo 'This script must be run as root (sudo newsfeed-deploy)' >&2
+  exit 1
+fi
+
+systemctl restart newsfeed.service
+sleep 2
+
+if systemctl is-active --quiet newsfeed.service; then
+  echo '✓ newsfeed restarted'
+  curl -s -o /dev/null -w '  local check: HTTP %{http_code} in %{time_total}s\n' http://localhost:8080/ || true
+else
+  echo '✗ newsfeed failed to start — last 30 log lines:' >&2
+  journalctl -u newsfeed.service -n 30 --no-pager
+  exit 1
+fi

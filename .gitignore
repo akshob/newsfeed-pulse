@@ -1,0 +1,28 @@
+# Swift / Vapor build artifacts
+app/.build/
+app/.swiftpm/
+app/DerivedData/
+app/xcuserdata/
+app/*.xcodeproj/
+app/default.profraw
+app/Packages/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Secrets and personal config
+app/.env
+app/.env.*
+!app/.env.example
+
+# Personal interest blurb — template is committed as interests.example.md
+app/Data/interests.md
+
+# Synced log files (pulled from hydrogen by tools/sync-logs.sh)
+logs/**
+!logs/.gitkeep
+
+# Misc
+app/db.sqlite
+*.log

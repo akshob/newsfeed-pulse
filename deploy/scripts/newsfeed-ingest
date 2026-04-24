@@ -1,0 +1,42 @@
+#!/bin/bash
+# /usr/local/bin/newsfeed-ingest — hourly pipeline: ingest → score → catchup-all
+# Timestamped per-run logs at /mnt/butterscotch/newsfeed/logs/ingest/
+# flock prevents overlapping runs (pipeline can exceed one hour under load)
+set -e
+
+APP_DIR=/mnt/butterscotch/newsfeed/app
+LOG_DIR=/mnt/butterscotch/newsfeed/logs/ingest
+
+mkdir -p "$LOG_DIR"
+find "$LOG_DIR" -name 'ingest-*.log' -type f -mtime +30 -delete 2>/dev/null || true
+
+TS=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+LOG="$LOG_DIR/ingest-$TS.log"
+
+cd "$APP_DIR"
+ln -sfn "$LOG" "$LOG_DIR/latest.log"
+
+# Prevent overlapping runs
+exec 9>/tmp/newsfeed-pipeline.lock
+if ! flock -n 9; then
+  echo "$(date -Iseconds) previous pipeline still running, skipping" >> "$LOG"
+  exit 0
+fi
+
+exec >> "$LOG" 2>&1
+echo "=== $(date -Iseconds) pipeline starting (pid $$) ==="
+
+echo ''
+echo '--- ingest ---'
+./.build/release/NewsFeed ingest || echo '(ingest failed, continuing)'
+
+echo ''
+echo '--- score ---'
+./.build/release/NewsFeed score --limit 100 || echo '(score failed, continuing)'
+
+echo ''
+echo '--- catchup-all ---'
+./.build/release/NewsFeed catchup-all --limit 50 || echo '(catchup-all failed, continuing)'
+
+echo ''
+echo "=== $(date -Iseconds) pipeline done ==="
