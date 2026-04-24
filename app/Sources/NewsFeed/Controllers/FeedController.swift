@@ -27,6 +27,10 @@ struct FeedController {
     func feedRaw(req: Request) async throws -> Response {
         let user = try req.auth.require(User.self)
         let items = try await loadRankedFeed(on: req, limit: 50, orderByScore: false)
-        return htmlResponse(FeedView.render(items: items, userEmail: user.email, title: "pulse / raw"))
+        return htmlResponse(FeedView.render(
+            items: items,
+            userEmail: user.email,
+            title: "pulse · raw"
+        ))
     }
 }

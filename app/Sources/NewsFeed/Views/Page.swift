@@ -17,7 +17,10 @@ func page(title: String, body: String) -> String {
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <meta name="theme-color" content="#0070f3">
       <title>\(htmlEscape(title))</title>
+      <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+      <link rel="apple-touch-icon" href="/favicon.svg">
       <style>\(pageCSS)</style>
       <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     </head>
@@ -28,6 +31,19 @@ func page(title: String, body: String) -> String {
     </html>
     """
 }
+
+/// Inline SVG favicon — ECG-style pulse line on a rounded accent-blue square.
+/// Served at /favicon.svg (no auth required). Modern browsers pick it up via
+/// `<link rel="icon" type="image/svg+xml">` and scale it to whatever size they
+/// need (favicon bar, bookmark, pinned-tab, apple-touch-icon).
+let faviconSVG = """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" rx="22" fill="#0070f3"/>
+  <path d="M 12 52 L 34 52 L 44 28 L 58 74 L 68 52 L 88 52"
+        stroke="white" stroke-width="8" fill="none"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+"""
 
 let pageJS = """
 function openDetail() {

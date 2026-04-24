@@ -9,6 +9,12 @@ func routes(_ app: Application) throws {
     AuthController().boot(routes: app)
     app.get("hello") { _ async in "Hello, world!" }
     app.get("healthz") { _ async in "ok" }
+    app.get("favicon.svg") { _ async -> Response in
+        let response = Response(status: .ok, body: .init(string: faviconSVG))
+        response.headers.replaceOrAdd(name: .contentType, value: "image/svg+xml")
+        response.headers.replaceOrAdd(name: .cacheControl, value: "public, max-age=604800")
+        return response
+    }
 
     // Protected
     let protected = app.grouped(AuthRedirectMiddleware(loginPath: "/login"))

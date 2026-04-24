@@ -1,7 +1,16 @@
 import Foundation
 
 enum FeedView {
-    static func render(items: [RankedRow], userEmail: String? = nil, title: String = "pulse", message: String? = nil) -> String {
+    /// - Parameters:
+    ///   - heading: visible h1 on the page (kept clean: "pulse")
+    ///   - title: browser tab / `<title>` — e.g. "pulse · feed" or "pulse · raw"
+    static func render(
+        items: [RankedRow],
+        userEmail: String? = nil,
+        heading: String = "pulse",
+        title: String = "pulse · feed",
+        message: String? = nil
+    ) -> String {
         let scoredCount = items.filter { $0.relevance_score != nil }.count
         let flash: String = {
             switch message {
@@ -13,7 +22,7 @@ enum FeedView {
         <header>
           <div class="header-row">
             <div>
-              <h1>\(htmlEscape(title))</h1>
+              <h1>\(htmlEscape(heading))</h1>
               <div class="subtitle">\(items.count) items · \(scoredCount) scored</div>
             </div>
             \(avatarHTML(for: userEmail))
