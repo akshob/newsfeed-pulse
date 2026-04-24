@@ -95,8 +95,8 @@ swift run -c release NewsFeed create-invite
 
 You'll see:
 ```
-✓ invite code:  mvcu-8qy6-9978
-  share URL:    https://pulse.akshob.com/signup?code=mvcu-8qy6-9978
+✓ invite code:  xxxx-xxxx-xxxx
+  share URL:    https://pulse.akshob.com/signup?code=xxxx-xxxx-xxxx
 ```
 
 Share the URL with the person you're inviting. Invite codes are **one-shot** — marked as used the moment someone signs up with them. Generate a fresh code per invitee. There's no expiry today; codes stay valid until used.
