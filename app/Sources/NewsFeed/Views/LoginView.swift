@@ -23,7 +23,7 @@ enum LoginView {
           <form method="POST" action="/login" class="auth-form">
             <label>Email <input type="email" name="email" required autofocus autocomplete="username"></label>
             <label>Password <input type="password" name="password" required autocomplete="current-password"></label>
-            <button type="submit">Log in</button>
+            <button type="submit" class="btn-small">Log in</button>
           </form>
           <p class="auth-footer">Have an invite? <a href="/signup">Sign up</a></p>
         </div>

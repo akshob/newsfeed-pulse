@@ -21,7 +21,7 @@ enum SignupView {
             <label>Email (this is your username) <input type="email" name="email" required autocomplete="username"></label>
             <label>Password (min 8 chars) <input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
             <label>Confirm password <input type="password" name="confirm_password" required minlength="8" autocomplete="new-password"></label>
-            <button type="submit">Create account</button>
+            <button type="submit" class="btn-small">Create account</button>
           </form>
           <p class="auth-footer">Already have an account? <a href="/login">Log in</a></p>
         </div>

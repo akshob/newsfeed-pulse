@@ -20,7 +20,12 @@ enum AccountView {
                   <h1>Account</h1>
                   <div class="subtitle">Signed in as <strong>\(htmlEscape(email))</strong></div>
                 </div>
-                <span class="avatar-link avatar-lg" aria-label="your avatar"><span class="avatar">\(identiconSVG(for: email, size: 64))</span></span>
+                <div class="avatar-stack">
+                  \(avatarHTML(for: email))
+                  <form method="POST" action="/logout">
+                    <button type="submit" class="btn-small">Log out</button>
+                  </form>
+                </div>
               </div>
               <nav class="btn-row">
                 <a class="btn-link" href="/">← feed</a>
@@ -40,16 +45,9 @@ enum AccountView {
                 <label>Current password <input type="password" name="current_password" required autocomplete="current-password"></label>
                 <label>New password (min 8 chars) <input type="password" name="new_password" required minlength="8" autocomplete="new-password"></label>
                 <label>Confirm new password <input type="password" name="confirm_password" required minlength="8" autocomplete="new-password"></label>
-                <button type="submit">Change password</button>
+                <button type="submit" class="btn-small">Change password</button>
               </form>
               <p class="muted">You'll be logged out and asked to sign in again after changing.</p>
-            </section>
-
-            <section class="account-section">
-              <h2>Sign out</h2>
-              <form method="POST" action="/logout" class="auth-form">
-                <button type="submit">Log out</button>
-              </form>
             </section>
 
             <section class="account-section danger-zone">
@@ -58,7 +56,7 @@ enum AccountView {
               <form method="POST" action="/account/delete" class="auth-form"
                     onsubmit="return confirm('Delete your account? This cannot be undone.');">
                 <label>Enter your password to confirm <input type="password" name="password" required autocomplete="current-password"></label>
-                <button type="submit" class="danger">Delete my account</button>
+                <button type="submit" class="btn-small danger">Delete my account</button>
               </form>
             </section>
           </div>

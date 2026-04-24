@@ -139,7 +139,13 @@ nav.btn-row{display:flex;gap:8px;flex-wrap:wrap}
 .avatar svg{display:block;width:100%;height:100%}
 .avatar-link{display:inline-flex;align-items:center;padding:2px;border-radius:50%;border:1px solid var(--border);text-decoration:none;transition:border-color 0.12s}
 .avatar-link:hover{text-decoration:none;border-color:var(--accent)}
-.avatar-lg .avatar{width:64px;height:64px}
+/* vertical stack of avatar + an action button, used in the /account header */
+.avatar-stack{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.avatar-stack form{margin:0}
+
+/* compact right-aligned submit button — same size as login/signup */
+.btn-small{align-self:flex-end;padding:8px 18px;font:inherit;font-size:14px;font-weight:600;color:#fff;background:var(--accent);border:none;border-radius:6px;cursor:pointer;max-width:none}
+.btn-small.danger{background:#dc2626}
 
 .card{padding:14px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.12s}
 .card:hover{background:var(--card)}
@@ -228,8 +234,6 @@ button.danger{background:#dc2626}
 
 .auth-wrap{max-width:400px;margin:80px auto;padding:24px 16px}
 .auth-footer{margin-top:16px;font-size:14px;color:var(--muted);text-align:center}
-/* login/signup submit — right-aligned, smaller than the full-width form buttons elsewhere */
-.auth-wrap .auth-form button{align-self:flex-end;padding:8px 18px;font-size:14px;max-width:none}
 
 .onboard-form fieldset{border:1px solid var(--border);border-radius:6px;padding:12px 16px;margin-bottom:8px}
 .onboard-form fieldset legend{padding:0 8px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em}
