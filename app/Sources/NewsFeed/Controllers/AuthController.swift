@@ -5,9 +5,15 @@ import Vapor
 struct AuthController {
     func boot(routes: any RoutesBuilder) {
         routes.get("login", use: self.loginForm)
-        routes.post("login", use: self.loginSubmit)
         routes.get("signup", use: self.signupForm)
-        routes.post("signup", use: self.signupSubmit)
+
+        // Per-IP rate limits on POST routes — defense against credential-stuffing
+        // and invite-code grinding. Applied only to submit handlers so GET
+        // traffic isn't throttled.
+        routes.grouped(RateLimitMiddleware(maxEvents: 10, window: 300))
+              .post("login", use: self.loginSubmit)
+        routes.grouped(RateLimitMiddleware(maxEvents: 5, window: 3600))
+              .post("signup", use: self.signupSubmit)
     }
 
     // GET /login
