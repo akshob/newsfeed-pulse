@@ -18,7 +18,9 @@ struct CatchupAllCommand: AsyncCommand {
         context.console.print("catchup-all: starting")
         let app = context.application
         let limit = signature.limit ?? 200
+        let model = Environment.get("OLLAMA_CHAT_MODEL") ?? "llama3.2:3b"
         let ollama = OllamaClient(client: app.client)
+        context.console.print("catchup-all: using chat model \(model)")
 
         guard let sql = app.db as? any SQLDatabase else {
             throw Abort(.internalServerError, reason: "expected SQLDatabase")
@@ -49,7 +51,7 @@ struct CatchupAllCommand: AsyncCommand {
         var done = 0
         for p in pending {
             do {
-                let html = try await buildExplainer(ollama: ollama, title: p.title, source: p.source_name, body: p.body)
+                let html = try await buildExplainer(ollama: ollama, model: model, title: p.title, source: p.source_name, body: p.body)
                 try await sql.raw("""
                     UPDATE item_scores
                     SET catchup_html = \(bind: html), catchup_generated_at = NOW()
@@ -68,6 +70,7 @@ struct CatchupAllCommand: AsyncCommand {
 
     private func buildExplainer(
         ollama: OllamaClient,
+        model: String,
         title: String,
         source: String,
         body: String?
@@ -109,7 +112,7 @@ struct CatchupAllCommand: AsyncCommand {
         """
 
         return try await ollama.chat(
-            model: "llama3.2:3b",
+            model: model,
             system: system,
             user: user,
             jsonMode: false,

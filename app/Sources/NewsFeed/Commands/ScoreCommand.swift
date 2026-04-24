@@ -19,8 +19,11 @@ struct ScoreCommand: AsyncCommand {
         context.console.print("score: starting")
         let app = context.application
         let limit = signature.limit ?? 100
-        let model = signature.model ?? "llama3.2:3b"
+        let model = signature.model
+            ?? Environment.get("OLLAMA_CHAT_MODEL")
+            ?? "llama3.2:3b"
         let ollama = OllamaClient(client: app.client)
+        context.console.print("score: using chat model \(model)")
 
         guard let sql = app.db as? any SQLDatabase else {
             throw Abort(.internalServerError, reason: "expected SQLDatabase")
