@@ -17,6 +17,7 @@ public func configure(_ app: Application) async throws {
     )
     app.databases.use(.postgres(configuration: postgresConfig), as: .psql)
 
+    // Migrations (order matters: later migrations reference earlier tables)
     app.migrations.add(CreateFeedSources())
     app.migrations.add(CreateFeedItems())
     app.migrations.add(CreateInterestProfile())
@@ -25,10 +26,27 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(AddCatchupCache())
     app.migrations.add(CreateEngagements())
 
+    // Auth-related migrations (Phase 1 auth)
+    app.migrations.add(CreateUsers())
+    app.migrations.add(CreateUserProfiles())
+    app.migrations.add(CreateInvites())
+    app.migrations.add(AddUserIdToEngagements())
+    app.migrations.add(AddUserIdToCaptures())
+    app.migrations.add(SessionRecord.migration)  // Fluent-backed session store
+
+    // Commands
     app.asyncCommands.use(SeedFeedsCommand(), as: "seed-feeds")
     app.asyncCommands.use(IngestCommand(), as: "ingest")
     app.asyncCommands.use(ScoreCommand(), as: "score")
     app.asyncCommands.use(CatchupAllCommand(), as: "catchup-all")
+    app.asyncCommands.use(CreateInviteCommand(), as: "create-invite")
+
+    // Sessions + authentication middleware. Sessions first, then the User
+    // authenticator that reads session → User. Routes opt in to protection
+    // via a grouped middleware (User.redirectMiddleware).
+    app.sessions.use(.fluent)
+    app.middleware.use(app.sessions.middleware)
+    app.middleware.use(User.sessionAuthenticator())
 
     // Generous body limit for capture text (default is 1MB, keep that)
     app.routes.defaultMaxBodySize = "1mb"

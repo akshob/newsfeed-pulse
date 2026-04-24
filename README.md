@@ -14,6 +14,7 @@ Live at [pulse.akshob.com](https://pulse.akshob.com) — deployed on a home Linu
 - Uncached items gracefully fall back to an iframe of the original article
 - Explicit **keep / skip** buttons; skipped items drop from the feed on next load
 - `/capture` endpoint for dropping in "heard this from my wife" style notes (not yet wired to the ranking, but stored)
+- **Invite-only signup** — public DNS, gated account creation; see [Inviting users](#inviting-users) below
 
 Full product thinking: see memory notes; short version: the target metric is "did this give me something I can bring up with non-engineers at lunch," not "did I learn something technical."
 
@@ -81,6 +82,35 @@ ssh akshobg@hydrogen.local 'sudo newsfeed-deploy'
 ```
 
 Claude drives this loop directly via SSH when you're collaborating with it.
+
+## Inviting users
+
+pulse is invite-only. The public DNS is reachable; `/signup` requires a valid unused code. To create an invite code, SSH to hydrogen and run:
+
+```bash
+ssh akshobg@hydrogen.local
+cd /mnt/butterscotch/newsfeed/app
+swift run -c release NewsFeed create-invite
+```
+
+You'll see:
+```
+✓ invite code:  mvcu-8qy6-9978
+  share URL:    https://pulse.akshob.com/signup?code=mvcu-8qy6-9978
+```
+
+Share the URL with the person you're inviting. Invite codes are **one-shot** — marked as used the moment someone signs up with them. Generate a fresh code per invitee. There's no expiry today; codes stay valid until used.
+
+After signup the user is redirected to `/onboarding` to pick interest categories + write a blurb, then lands on their feed.
+
+**Managing invites directly in the DB** (view/revoke):
+```bash
+PGPASSWORD=... psql -h localhost -U newsfeed -d newsfeed
+# see all invites
+SELECT code, created_at, used_at, used_by_user_id FROM invites ORDER BY created_at DESC;
+# revoke an unused invite
+DELETE FROM invites WHERE code='xxxx-xxxx-xxxx' AND used_at IS NULL;
+```
 
 ## Setup (fresh install)
 
