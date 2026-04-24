@@ -16,9 +16,11 @@ struct FeedController {
         if profile == nil { return req.redirect(to: "/onboarding") }
 
         let items = try await loadRankedFeed(on: req, limit: 25)
+        let lastIngestAt = try await loadLastIngestAt(on: req)
         return htmlResponse(FeedView.render(
             items: items,
             userEmail: user.email,
+            lastIngestAt: lastIngestAt,
             message: try? req.query.get(String.self, at: "msg")
         ))
     }
@@ -27,10 +29,12 @@ struct FeedController {
     func feedRaw(req: Request) async throws -> Response {
         let user = try req.auth.require(User.self)
         let items = try await loadRankedFeed(on: req, limit: 50, orderByScore: false)
+        let lastIngestAt = try await loadLastIngestAt(on: req)
         return htmlResponse(FeedView.render(
             items: items,
             userEmail: user.email,
-            title: "pulse · raw"
+            title: "pulse · raw",
+            lastIngestAt: lastIngestAt
         ))
     }
 }

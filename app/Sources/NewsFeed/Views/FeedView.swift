@@ -9,9 +9,14 @@ enum FeedView {
         userEmail: String? = nil,
         heading: String = "pulse",
         title: String = "pulse · feed",
+        lastIngestAt: Date? = nil,
         message: String? = nil
     ) -> String {
         let scoredCount = items.filter { $0.relevance_score != nil }.count
+        let ingestLabel: String = {
+            guard let date = lastIngestAt else { return "" }
+            return " · last ingest \(relativeTime(date))"
+        }()
         let flash: String = {
             switch message {
             case "interests_saved": return "<div class=\"flash ok\">Interests saved.</div>"
@@ -23,7 +28,7 @@ enum FeedView {
           <div class="header-row">
             <div>
               <h1>\(htmlEscape(heading))</h1>
-              <div class="subtitle">\(items.count) items · \(scoredCount) scored</div>
+              <div class="subtitle">\(items.count) items · \(scoredCount) scored\(ingestLabel)</div>
             </div>
             \(avatarHTML(for: userEmail))
           </div>
