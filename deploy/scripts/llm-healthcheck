@@ -1,0 +1,69 @@
+#!/bin/bash
+# /usr/local/bin/llm-healthcheck
+#
+# Periodic reachability probe for the two Ollama endpoints pulse depends on:
+#   - embed (OLLAMA_EMBED_BASE_URL, default localhost:11434)
+#   - chat  (OLLAMA_CHAT_BASE_URL, falls back to OLLAMA_BASE_URL, default
+#            oxygen.local:11434)
+#
+# Writes one line per invocation to logs/llm/llm-<UTC-day>.log so we can
+# answer "when did oxygen flake?" without correlating against user-facing
+# failures. Cron'd every 30 min; rotates by filename, auto-prunes >30 days.
+#
+# Sample output line:
+#   2026-04-25T18:42:00Z embed=ok(45ms) chat=ok(173ms) loaded=qwen2.5:32b
+#   2026-04-25T19:12:00Z embed=ok(50ms) chat=FAIL loaded=?
+
+set -u
+
+LOG_DIR=/mnt/butterscotch/newsfeed-pulse/logs/llm
+EMBED_URL="${OLLAMA_EMBED_BASE_URL:-http://localhost:11434}"
+CHAT_URL="${OLLAMA_CHAT_BASE_URL:-${OLLAMA_BASE_URL:-http://oxygen.local:11434}}"
+TIMEOUT=5
+
+mkdir -p "$LOG_DIR"
+find "$LOG_DIR" -name 'llm-*.log' -type f -mtime +30 -delete 2>/dev/null || true
+
+DAY=$(date -u +%Y-%m-%d)
+LOG="$LOG_DIR/llm-$DAY.log"
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+probe() {
+    local url="$1"
+    local out
+    out=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' --max-time "$TIMEOUT" "$url/api/tags" 2>&1)
+    if [ -z "$out" ]; then
+        echo "FAIL"
+        return
+    fi
+    local code; code=$(echo "$out" | awk '{print $1}')
+    local secs; secs=$(echo "$out" | awk '{print $2}')
+    if [ "$code" = "200" ]; then
+        local ms; ms=$(awk -v s="$secs" 'BEGIN { printf "%d", s*1000 }')
+        echo "ok(${ms}ms)"
+    else
+        echo "FAIL(http=$code)"
+    fi
+}
+
+# Comma-separated names of models currently in VRAM on the chat side. Useful
+# for catching "model evicted, next chat call eats a cold-load tax" cases.
+loaded_models() {
+    local url="$1"
+    local names
+    names=$(curl -s --max-time "$TIMEOUT" "$url/api/ps" 2>/dev/null \
+        | grep -oE '"name":"[^"]+"' \
+        | sed 's/"name":"//;s/"$//' \
+        | paste -sd ',' -)
+    echo "${names:-none}"
+}
+
+EMBED=$(probe "$EMBED_URL")
+CHAT=$(probe "$CHAT_URL")
+
+case "$CHAT" in
+    ok*) LOADED=$(loaded_models "$CHAT_URL") ;;
+    *)   LOADED="?" ;;
+esac
+
+echo "$NOW embed=$EMBED chat=$CHAT loaded=$LOADED" >> "$LOG"

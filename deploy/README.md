@@ -20,6 +20,16 @@ Use:
 sudo newsfeed-deploy
 ```
 
+### `llm-healthcheck`
+Probes the two Ollama endpoints (embed on hydrogen-localhost, chat on oxygen) every 30 min and appends one line to `logs/llm/llm-<UTC-day>.log`. Lets us pinpoint "when did oxygen flake?" without grepping through ingest/onboarding logs. Auto-prunes log files older than 30 days. Installed to `/usr/local/bin/llm-healthcheck` (root:root, 755). Cron entry in `akshobg`'s crontab:
+```
+*/30 * * * * /usr/local/bin/llm-healthcheck
+```
+Sample line:
+```
+2026-04-25T18:42:00Z embed=ok(45ms) chat=ok(173ms) loaded=qwen2.5:32b
+```
+
 ## systemd (`systemd/`)
 
 ### `newsfeed.service`
@@ -43,10 +53,11 @@ sudo systemctl daemon-reload
 sudo systemctl restart ollama
 ```
 
-## Script install (both)
+## Script install
 ```bash
 sudo install -o root -g root -m 755 deploy/scripts/newsfeed-ingest /usr/local/bin/
 sudo install -o root -g root -m 755 deploy/scripts/newsfeed-deploy /usr/local/bin/
+sudo install -o root -g root -m 755 deploy/scripts/llm-healthcheck /usr/local/bin/
 ```
 
 ## Host prerequisites
