@@ -61,21 +61,24 @@ struct AuthController {
         let app = req.application
         let logger = req.logger
         Task.detached {
+            await AuthFileLogger.shared.append(
+                "post-login catchup: starting for \(email)", level: "info"
+            )
             do {
                 let count = try await catchupTopItemsForUser(
                     userID: userID,
                     application: app,
                     logger: logger
                 )
-                if count > 0 {
-                    logger.info("post-login catchup: \(email) generated \(count) explainers")
-                    await AuthFileLogger.shared.append(
-                        "post-login catchup: \(email) generated \(count) explainers",
-                        level: "info"
-                    )
-                }
+                let msg = count > 0
+                    ? "post-login catchup: \(email) generated \(count) explainers"
+                    : "post-login catchup: \(email) — nothing pending (everything already cached)"
+                logger.info("\(msg)")
+                await AuthFileLogger.shared.append(msg, level: "info")
             } catch {
-                logger.error("post-login catchup: \(email) failed: \(error)")
+                let msg = "post-login catchup: \(email) failed: \(String(reflecting: error))"
+                logger.error("\(msg)")
+                await AuthFileLogger.shared.append(msg, level: "error")
             }
         }
         return req.redirect(to: target)

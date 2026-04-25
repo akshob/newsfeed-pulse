@@ -74,6 +74,7 @@ func catchupTopItemsForUser(
 
     var done = 0
     for p in pending {
+        let started = Date()
         do {
             let html = try await buildExplainer(
                 ollama: ollama, model: model,
@@ -85,7 +86,8 @@ func catchupTopItemsForUser(
                 WHERE item_id = \(bind: p.item_id)
                 """).run()
             done += 1
-            logger.info("catchupTopItemsForUser: \(userID) progress \(done)/\(pending.count)")
+            let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+            logger.info("catchupTopItemsForUser: \(userID) \(done)/\(pending.count) ok (\(elapsed)ms) [\(p.title.prefix(60))]")
         } catch {
             logger.error("catchupTopItemsForUser: \(userID) item \(p.item_id) failed: \(error)")
         }

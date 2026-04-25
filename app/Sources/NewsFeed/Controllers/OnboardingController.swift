@@ -61,6 +61,9 @@ struct OnboardingController {
         let logger = req.logger
         let email = user.email
         Task.detached {
+            await OnboardingFileLogger.shared.append(
+                "post-onboard pipeline: starting for \(email)", level: "info"
+            )
             // Phase A: per-user LLM rerank — gets card text personalized.
             do {
                 let count = try await rescoreUser(
@@ -89,7 +92,9 @@ struct OnboardingController {
                     application: app,
                     logger: logger
                 )
-                let msg = "post-onboard catchup: \(email) generated \(count) explainers"
+                let msg = count > 0
+                    ? "post-onboard catchup: \(email) generated \(count) explainers"
+                    : "post-onboard catchup: \(email) — nothing pending"
                 logger.info("\(msg)")
                 await OnboardingFileLogger.shared.append(msg, level: "info")
             } catch {
