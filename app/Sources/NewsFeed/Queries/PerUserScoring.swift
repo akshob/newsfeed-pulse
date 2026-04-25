@@ -21,6 +21,7 @@ func rescoreUser(
     userID: UUID,
     application: Application,
     logger: Logger,
+    fileLog: (@Sendable (String) async -> Void)? = nil,
     model overrideModel: String? = nil,
     limit: Int = 200,
     maxParallel: Int = 2
@@ -51,7 +52,16 @@ func rescoreUser(
         return 0
     }
 
+    // Order by the SAME ranking expression the feed query uses, so the items
+    // we score first are the ones the user is actually about to see at the
+    // top — not just the most-recently-fetched ones. Glitch fix: previous
+    // ORDER BY fi.fetched_at DESC meant brand-new users got their freshest
+    // 38 items scored, while the items their feed actually surfaced (older
+    // but higher relevance × cosine match) stayed unpersonalized.
     let items: [ScoringItemRow] = try await sql.raw("""
+        WITH user_emb AS (
+          SELECT embedding FROM user_profiles WHERE user_id = \(bind: userID) LIMIT 1
+        )
         SELECT fi.id AS id, fi.title AS title, fi.body AS body,
                fs.name AS source_name, fs.lane AS source_lane
         FROM feed_items fi
@@ -67,11 +77,16 @@ func rescoreUser(
                 AND \(bind: user.profile_updated_at) IS NOT NULL
                 AND uis.scored_at < \(bind: user.profile_updated_at))
           )
-        ORDER BY fi.fetched_at DESC
+        ORDER BY (
+          COALESCE(uis.relevance_score, isc.relevance_score)::float
+          * GREATEST(0, 1 - (isc.embedding <=> (SELECT embedding FROM user_emb)))
+          * GREATEST(0.5, 1 - EXTRACT(EPOCH FROM NOW() - COALESCE(fi.published_at, fi.fetched_at))/604800)
+        ) DESC NULLS LAST
         LIMIT \(bind: limit)
         """).all(decoding: ScoringItemRow.self)
 
     logger.info("rescoreUser: \(user.email) has \(items.count) items to rescore (maxParallel=\(maxParallel))")
+    await fileLog?("rescoreUser: \(user.email) eligible=\(items.count)")
 
     let userBlurb = user.blurb
     let userEmail = user.email
@@ -128,5 +143,6 @@ func rescoreUser(
         }
     }
     logger.info("rescoreUser: \(userEmail) done \(done)/\(items.count)")
+    await fileLog?("rescoreUser: \(userEmail) done \(done)/\(items.count)")
     return done
 }

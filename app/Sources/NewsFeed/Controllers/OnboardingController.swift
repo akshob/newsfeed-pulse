@@ -60,20 +60,25 @@ struct OnboardingController {
         let app = req.application
         let logger = req.logger
         let email = user.email
+        // Helper: write to onboarding file (passed into helpers so they can
+        // log start/end from inside, surviving any Task wrapper drama).
+        @Sendable func tlog(_ msg: String) async {
+            await OnboardingFileLogger.shared.append(msg, level: "info")
+        }
         Task.detached {
-            await OnboardingFileLogger.shared.append(
-                "post-onboard pipeline: starting for \(email)", level: "info"
-            )
+            await tlog("post-onboard pipeline: starting for \(email)")
+
             // Phase A: per-user LLM rerank — gets card text personalized.
             do {
                 let count = try await rescoreUser(
                     userID: userID,
                     application: app,
-                    logger: logger
+                    logger: logger,
+                    fileLog: tlog
                 )
                 let msg = "post-onboard rescore: \(email) scored \(count) items"
                 logger.info("\(msg)")
-                await OnboardingFileLogger.shared.append(msg, level: "info")
+                await tlog(msg)
             } catch {
                 let msg = "post-onboard rescore: \(email) failed: \(String(reflecting: error))"
                 logger.error("\(msg)")
@@ -81,22 +86,21 @@ struct OnboardingController {
                 return
             }
 
-            // Phase B: pre-generate catchup HTML for the top items this user is
-            // about to see. Runs sequentially after rescore so the "top" query
-            // uses fresh per-user scores. First explainer ready in ~30s, the
-            // user can refresh and click instead of seeing "generating in
-            // background".
+            // Phase B: pre-generate catchup HTML for the top items this user
+            // is about to see. Runs sequentially after rescore so the "top"
+            // query uses fresh per-user scores.
             do {
                 let count = try await catchupTopItemsForUser(
                     userID: userID,
                     application: app,
-                    logger: logger
+                    logger: logger,
+                    fileLog: tlog
                 )
                 let msg = count > 0
                     ? "post-onboard catchup: \(email) generated \(count) explainers"
                     : "post-onboard catchup: \(email) — nothing pending"
                 logger.info("\(msg)")
-                await OnboardingFileLogger.shared.append(msg, level: "info")
+                await tlog(msg)
             } catch {
                 let msg = "post-onboard catchup: \(email) failed: \(String(reflecting: error))"
                 logger.error("\(msg)")

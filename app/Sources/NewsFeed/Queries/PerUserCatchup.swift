@@ -24,6 +24,7 @@ func catchupTopItemsForUser(
     userID: UUID,
     application: Application,
     logger: Logger,
+    fileLog: (@Sendable (String) async -> Void)? = nil,
     limit: Int = 10,
     maxParallel: Int = 2,
     model overrideModel: String? = nil
@@ -69,9 +70,11 @@ func catchupTopItemsForUser(
 
     if pending.isEmpty {
         logger.info("catchupTopItemsForUser: \(userID) — nothing pending")
+        await fileLog?("catchupTopItemsForUser: \(userID) — nothing pending")
         return 0
     }
     logger.info("catchupTopItemsForUser: \(userID) — \(pending.count) explainers to generate (maxParallel=\(maxParallel))")
+    await fileLog?("catchupTopItemsForUser: \(userID) — \(pending.count) explainers to generate")
 
     // Process in chunks of `maxParallel`. Each chunk fires a TaskGroup so the
     // chat calls run in parallel client-side; oxygen's OLLAMA_NUM_PARALLEL
@@ -113,5 +116,6 @@ func catchupTopItemsForUser(
         i = chunkEnd
         logger.info("catchupTopItemsForUser: \(userID) progress \(done)/\(pending.count)")
     }
+    await fileLog?("catchupTopItemsForUser: \(userID) done \(done)/\(pending.count)")
     return done
 }

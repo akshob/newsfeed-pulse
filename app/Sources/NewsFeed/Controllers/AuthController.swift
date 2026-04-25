@@ -19,6 +19,7 @@ struct AuthController {
     // GET /login
     func loginForm(req: Request) async throws -> Response {
         if req.auth.has(User.self) { return req.redirect(to: "/") }
+        authLog(req, "login/form: viewed")
         let msg = try? req.query.get(String.self, at: "msg")
         let err = try? req.query.get(String.self, at: "err")
         return htmlResponse(LoginView.render(message: msg, error: err))
@@ -32,6 +33,8 @@ struct AuthController {
     // future log line here: don't — hash it instead, or drop it.
     func loginSubmit(req: Request) async throws -> Response {
         struct Form: Content { var email: String; var password: String }
+        let started = Date()
+        authLog(req, "login/submit: received")
         let form: Form
         do {
             form = try req.content.decode(Form.self)
@@ -42,7 +45,8 @@ struct AuthController {
         let email = form.email.lowercased().trimmingCharacters(in: .whitespaces)
         guard let user = try await User.query(on: req.db).filter(\.$email == email).first(),
               (try? user.verify(password: form.password)) == true else {
-            authLog(req, "login/submit: invalid email=\(email)", level: .warning)
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            authLog(req, "login/submit: invalid email=\(email) (\(ms)ms)", level: .warning)
             return req.redirect(to: "/login?err=invalid")
         }
         req.auth.login(user)
@@ -51,7 +55,8 @@ struct AuthController {
         let profile = try await UserProfile.query(on: req.db)
             .filter(\.$user.$id == userID).first()
         let target = profile == nil ? "/onboarding" : "/"
-        authLog(req, "login/submit: success email=\(email) redirect=\(target)")
+        let ms = Int(Date().timeIntervalSince(started) * 1000)
+        authLog(req, "login/submit: success email=\(email) redirect=\(target) (\(ms)ms)")
 
         // Login is a clear "user is about to look at their feed" signal.
         // Pre-generate explainers for whatever's at the top of their feed
@@ -60,21 +65,23 @@ struct AuthController {
         // common case.
         let app = req.application
         let logger = req.logger
+        @Sendable func tlog(_ msg: String) async {
+            await AuthFileLogger.shared.append(msg, level: "info")
+        }
         Task.detached {
-            await AuthFileLogger.shared.append(
-                "post-login catchup: starting for \(email)", level: "info"
-            )
+            await tlog("post-login catchup: starting for \(email)")
             do {
                 let count = try await catchupTopItemsForUser(
                     userID: userID,
                     application: app,
-                    logger: logger
+                    logger: logger,
+                    fileLog: tlog
                 )
                 let msg = count > 0
                     ? "post-login catchup: \(email) generated \(count) explainers"
                     : "post-login catchup: \(email) — nothing pending (everything already cached)"
                 logger.info("\(msg)")
-                await AuthFileLogger.shared.append(msg, level: "info")
+                await tlog(msg)
             } catch {
                 let msg = "post-login catchup: \(email) failed: \(String(reflecting: error))"
                 logger.error("\(msg)")
@@ -88,6 +95,7 @@ struct AuthController {
     func signupForm(req: Request) async throws -> Response {
         if req.auth.has(User.self) { return req.redirect(to: "/") }
         let code = (try? req.query.get(String.self, at: "code")) ?? ""
+        authLog(req, "signup/form: viewed code=\(code.isEmpty ? "<none>" : code)")
         let err = try? req.query.get(String.self, at: "err")
         return htmlResponse(SignupView.render(prefilledCode: code, error: err))
     }
@@ -102,6 +110,8 @@ struct AuthController {
             var password: String
             var confirm_password: String
         }
+        let started = Date()
+        authLog(req, "signup/submit: received")
         let form: Form
         do {
             form = try req.content.decode(Form.self)
@@ -113,7 +123,8 @@ struct AuthController {
         let email = form.email.lowercased().trimmingCharacters(in: .whitespaces)
 
         func bounce(_ err: String) -> Response {
-            authLog(req, "signup/submit: \(err) email=\(email) code=\(code)", level: .warning)
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            authLog(req, "signup/submit: \(err) email=\(email) code=\(code) (\(ms)ms)", level: .warning)
             return req.redirect(to: "/signup?err=\(err)&code=\(code)")
         }
 
@@ -137,7 +148,8 @@ struct AuthController {
 
         req.auth.login(user)
         req.session.authenticate(user)
-        authLog(req, "signup/submit: success email=\(email) code=\(code)")
+        let ms = Int(Date().timeIntervalSince(started) * 1000)
+        authLog(req, "signup/submit: success email=\(email) code=\(code) (\(ms)ms)")
         return req.redirect(to: "/onboarding")
     }
 }
