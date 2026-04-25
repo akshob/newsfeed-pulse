@@ -26,6 +26,7 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(AddCatchupCache())
     app.migrations.add(CreateEngagements())
     app.migrations.add(AddDupOfItemIdToItemScores())
+    app.migrations.add(CreateUserItemScores())
 
     // Auth-related migrations (Phase 1 auth)
     app.migrations.add(CreateUsers())

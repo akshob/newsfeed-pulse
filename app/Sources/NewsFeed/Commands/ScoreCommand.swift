@@ -12,7 +12,7 @@ struct ScoreCommand: AsyncCommand {
     }
 
     var help: String {
-        "Score feed_items: compute embeddings, cosine similarity, LLM rerank+TLDR, store in item_scores"
+        "Score feed_items: phase 1 = global embed/dedup/fallback rerank; phase 2 = per-user LLM rerank against each user's blurb"
     }
 
     func run(using context: CommandContext, signature: Signature) async throws {
@@ -40,8 +40,8 @@ struct ScoreCommand: AsyncCommand {
         }
         context.console.print("profile embedding ready (dim=\(profileEmbedding.count))")
 
-        // 2. Find un-scored items
-        context.console.print("score: querying un-scored items")
+        // 2. Phase 1 — global scoring of un-scored items (embed + dedup + fallback rerank)
+        context.console.print("score: phase 1 — global scoring of un-scored items")
         let rows: [UnScoredRow]
         do {
             rows = try await sql.raw("""
@@ -58,14 +58,14 @@ struct ScoreCommand: AsyncCommand {
             throw error
         }
 
-        context.console.print("scoring \(rows.count) items…")
+        context.console.print("  scoring \(rows.count) items globally…")
 
-        let blurb = try loadBlurb(app: app)
+        let globalBlurb = try loadBlurb(app: app)
         var scored = 0
         for row in rows {
             do {
                 try await scoreOne(row: row,
-                                   blurb: blurb,
+                                   blurb: globalBlurb,
                                    profileEmbedding: profileEmbedding,
                                    ollama: ollama,
                                    model: model,
@@ -78,7 +78,128 @@ struct ScoreCommand: AsyncCommand {
                 context.console.error("  [\(row.title.prefix(60))] error: \(error)")
             }
         }
-        context.console.print("Done: \(scored)/\(rows.count) scored")
+        context.console.print("  phase 1 done: \(scored)/\(rows.count) scored")
+
+        // 3. Phase 2 — per-user LLM rerank for items lacking a fresh user-side score.
+        // Each user's blurb (from user_profiles.blurb) drives a separate rerank
+        // so the displayed tldr/why_this/relevance reflect that specific user's
+        // interests rather than the owner's global interests.md.
+        try await scorePerUser(
+            app: app,
+            ollama: ollama,
+            model: model,
+            sql: sql,
+            context: context
+        )
+    }
+
+    // MARK: - Phase 2: per-user scoring
+
+    private struct UserToScore: Decodable {
+        let user_id: UUID
+        let email: String
+        let blurb: String
+        let profile_updated_at: Date?
+    }
+
+    private struct PerUserItemRow: Decodable {
+        let id: UUID
+        let title: String
+        let body: String?
+        let source_name: String
+        let source_lane: String
+    }
+
+    private func scorePerUser(
+        app: Application,
+        ollama: OllamaClient,
+        model: String,
+        sql: any SQLDatabase,
+        context: CommandContext
+    ) async throws {
+        context.console.print("score: phase 2 — per-user scoring")
+
+        // Active users with a profile we can score against. No blurb → skip.
+        let users = try await sql.raw("""
+            SELECT u.id AS user_id, u.email AS email,
+                   p.blurb AS blurb, p.updated_at AS profile_updated_at
+            FROM users u
+            JOIN user_profiles p ON p.user_id = u.id
+            WHERE p.blurb IS NOT NULL AND length(p.blurb) > 0
+            ORDER BY p.updated_at DESC NULLS LAST
+            """).all(decoding: UserToScore.self)
+        context.console.print("  \(users.count) users with profiles")
+
+        for user in users {
+            // Items eligible for per-user scoring:
+            //   - already globally scored (so we have an embedding + dedup decision)
+            //   - not a duplicate
+            //   - recent enough that the score is worth computing (< 7 days)
+            //   - either no per-user score yet, OR the user's per-item score is
+            //     older than their current profile (blurb changed → stale)
+            let items: [PerUserItemRow] = try await sql.raw("""
+                SELECT fi.id AS id, fi.title AS title, fi.body AS body,
+                       fs.name AS source_name, fs.lane AS source_lane
+                FROM feed_items fi
+                JOIN feed_sources fs ON fi.source_id = fs.id
+                JOIN item_scores isc ON isc.item_id = fi.id
+                LEFT JOIN user_item_scores uis
+                  ON uis.item_id = fi.id AND uis.user_id = \(bind: user.user_id)
+                WHERE isc.dup_of_item_id IS NULL
+                  AND fi.fetched_at > NOW() - INTERVAL '7 days'
+                  AND (
+                    uis.id IS NULL
+                    OR (uis.scored_at IS NOT NULL
+                        AND \(bind: user.profile_updated_at) IS NOT NULL
+                        AND uis.scored_at < \(bind: user.profile_updated_at))
+                  )
+                ORDER BY fi.fetched_at DESC
+                LIMIT 200
+                """).all(decoding: PerUserItemRow.self)
+
+            context.console.print("  user \(user.email): \(items.count) items to score")
+
+            var done = 0
+            for item in items {
+                do {
+                    let bodyClean = item.body.map(stripTags) ?? ""
+                    let row = UnScoredRow(
+                        id: item.id, title: item.title, body: item.body,
+                        source_name: item.source_name, source_lane: item.source_lane
+                    )
+                    let rerank = await llmRerank(
+                        ollama: ollama, model: model,
+                        blurb: user.blurb, row: row, body: bodyClean
+                    )
+                    try await sql.raw("""
+                        INSERT INTO user_item_scores
+                          (id, user_id, item_id, relevance_score, tldr, why_this, lane, scored_at)
+                        VALUES
+                          (\(bind: UUID()),
+                           \(bind: user.user_id),
+                           \(bind: item.id),
+                           \(bind: rerank.relevanceScore),
+                           \(bind: rerank.tldr),
+                           \(bind: rerank.whyThis),
+                           \(bind: rerank.lane ?? item.source_lane),
+                           NOW())
+                        ON CONFLICT (user_id, item_id) DO UPDATE SET
+                          relevance_score = EXCLUDED.relevance_score,
+                          tldr = EXCLUDED.tldr,
+                          why_this = EXCLUDED.why_this,
+                          lane = EXCLUDED.lane,
+                          scored_at = EXCLUDED.scored_at
+                        """).run()
+                    done += 1
+                    if done % 10 == 0 {
+                        context.console.print("    \(user.email): \(done)/\(items.count)")
+                    }
+                } catch {
+                    context.console.error("    [\(user.email)/\(item.title.prefix(40))] error: \(error)")
+                }
+            }
+            context.console.print("  user \(user.email): scored \(done)/\(items.count)")
+        }
     }
 
     // MARK: - Single item

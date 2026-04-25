@@ -45,9 +45,13 @@ func loadRankedFeed(
         throw Abort(.internalServerError, reason: "expected SQLDatabase")
     }
 
+    // Per-user fields fall back to the global item_scores values when this
+    // user hasn't been scored on the item yet (e.g. brand-new user, or item
+    // arrived after the last per-user pass). Once Phase 2 of ScoreCommand
+    // runs for them, the COALESCE picks up the personalized values.
     let scoreExpr = """
         COALESCE(
-          isc.relevance_score::float
+          COALESCE(uis.relevance_score, isc.relevance_score)::float
           * GREATEST(0, 1 - (isc.embedding <=> (SELECT embedding FROM user_emb)))
           * GREATEST(0.5, 1 - EXTRACT(EPOCH FROM NOW() - COALESCE(fi.published_at, fi.fetched_at)) / 604800),
           0
@@ -69,17 +73,19 @@ func loadRankedFeed(
                fi.fetched_at AS fetched_at,
                fs.name AS source_name,
                fs.lane AS source_lane,
-               isc.relevance_score AS relevance_score,
+               COALESCE(uis.relevance_score, isc.relevance_score) AS relevance_score,
                isc.similarity AS similarity,
-               isc.tldr AS tldr,
-               isc.why_this AS why_this,
-               isc.lane AS predicted_lane,
+               COALESCE(uis.tldr, isc.tldr) AS tldr,
+               COALESCE(uis.why_this, isc.why_this) AS why_this,
+               COALESCE(uis.lane, isc.lane) AS predicted_lane,
                (SELECT event FROM engagements eng
                   WHERE eng.item_id = fi.id AND eng.user_id = \(bind: userID)
                   ORDER BY eng.created_at DESC LIMIT 1) AS latest_engagement
         FROM feed_items fi
         JOIN feed_sources fs ON fi.source_id = fs.id
         LEFT JOIN item_scores isc ON isc.item_id = fi.id
+        LEFT JOIN user_item_scores uis
+          ON uis.item_id = fi.id AND uis.user_id = \(bind: userID)
         WHERE isc.dup_of_item_id IS NULL
           AND (
             SELECT event FROM engagements eng2
