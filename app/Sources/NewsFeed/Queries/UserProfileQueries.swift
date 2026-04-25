@@ -69,6 +69,7 @@ func upsertUserProfile(userID: UUID, newBlurb: String? = nil, on req: Request) a
     guard let sql = req.db as? any SQLDatabase else {
         throw Abort(.internalServerError, reason: "expected SQLDatabase")
     }
+    req.logger.info("upsertUserProfile: user=\(userID) hasNewBlurb=\(newBlurb != nil)")
 
     let existing = try await UserProfile.query(on: req.db)
         .filter(\.$user.$id == userID).first()
@@ -79,8 +80,7 @@ func upsertUserProfile(userID: UUID, newBlurb: String? = nil, on req: Request) a
     } else if let existing = existing {
         blurb = existing.blurb
     } else {
-        // No newBlurb provided AND no existing profile — nothing meaningful
-        // to embed. Skip silently (the capture row is still saved).
+        req.logger.warning("upsertUserProfile: no blurb available for \(userID); skipping")
         return
     }
 
@@ -92,8 +92,18 @@ func upsertUserProfile(userID: UUID, newBlurb: String? = nil, on req: Request) a
         .map { CaptureSummary(content: $0.content, sourceHint: $0.sourceHint) }
 
     let embedText = composeUserEmbeddingText(blurb: blurb, recentCaptures: captures)
+    req.logger.info("upsertUserProfile: embedding text len=\(embedText.count) chars, captures=\(captures.count)")
+
     let ollama = OllamaClient(client: req.client)
-    let embedding = try await ollama.embed(text: embedText)
+    let embedStart = Date()
+    let embedding: [Double]
+    do {
+        embedding = try await ollama.embed(text: embedText)
+    } catch {
+        req.logger.error("upsertUserProfile: ollama.embed failed after \(Int(Date().timeIntervalSince(embedStart)*1000))ms: \(String(reflecting: error))")
+        throw error
+    }
+    req.logger.info("upsertUserProfile: embedded in \(Int(Date().timeIntervalSince(embedStart)*1000))ms, dim=\(embedding.count)")
 
     if let existing = existing, let existingID = existing.id {
         try await sql.raw("""
@@ -103,6 +113,7 @@ func upsertUserProfile(userID: UUID, newBlurb: String? = nil, on req: Request) a
                 updated_at = NOW()
             WHERE id = \(bind: existingID)
             """).run()
+        req.logger.info("upsertUserProfile: updated existing profile \(existingID)")
     } else {
         try await sql.raw("""
             INSERT INTO user_profiles (id, user_id, blurb, embedding, updated_at)
@@ -112,5 +123,6 @@ func upsertUserProfile(userID: UUID, newBlurb: String? = nil, on req: Request) a
                     \(unsafeRaw: "'\(pgvectorLiteral(embedding))'::vector"),
                     NOW())
             """).run()
+        req.logger.info("upsertUserProfile: inserted new profile for \(userID)")
     }
 }

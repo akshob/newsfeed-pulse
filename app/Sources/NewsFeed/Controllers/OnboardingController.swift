@@ -28,12 +28,29 @@ struct OnboardingController {
             var blurb: String?
         }
         let user = try req.auth.require(User.self)
-        let form = try req.content.decode(Form.self)
+        let userID = try user.requireID()
+        req.logger.info("onboarding/submit: user=\(user.email)")
+
+        let form: Form
+        do {
+            form = try req.content.decode(Form.self)
+        } catch {
+            req.logger.error("onboarding/submit: form decode failed: \(String(reflecting: error))")
+            throw error
+        }
         let blurb = composeBlurb(categories: form.categories ?? [], freeform: form.blurb ?? "")
+        req.logger.info("onboarding/submit: composed blurb len=\(blurb.count) categories=\(form.categories ?? [])")
+
         guard !blurb.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return req.redirect(to: "/onboarding?err=empty")
         }
-        try await upsertUserProfile(userID: try user.requireID(), newBlurb: blurb, on: req)
+        do {
+            try await upsertUserProfile(userID: userID, newBlurb: blurb, on: req)
+        } catch {
+            req.logger.error("onboarding/submit: upsertUserProfile failed for \(user.email): \(String(reflecting: error))")
+            throw error
+        }
+        req.logger.info("onboarding/submit: success for \(user.email)")
         return req.redirect(to: "/?msg=interests_saved")
     }
 }
