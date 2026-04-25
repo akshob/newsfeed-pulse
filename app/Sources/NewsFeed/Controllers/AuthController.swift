@@ -47,10 +47,37 @@ struct AuthController {
         }
         req.auth.login(user)
         req.session.authenticate(user)
+        let userID = try user.requireID()
         let profile = try await UserProfile.query(on: req.db)
-            .filter(\.$user.$id == user.requireID()).first()
+            .filter(\.$user.$id == userID).first()
         let target = profile == nil ? "/onboarding" : "/"
         authLog(req, "login/submit: success email=\(email) redirect=\(target)")
+
+        // Login is a clear "user is about to look at their feed" signal.
+        // Pre-generate explainers for whatever's at the top of their feed
+        // and missing catchup_html. The query bails fast (returns 0 items)
+        // when everything's already cached, so this is cheap on the
+        // common case.
+        let app = req.application
+        let logger = req.logger
+        Task.detached {
+            do {
+                let count = try await catchupTopItemsForUser(
+                    userID: userID,
+                    application: app,
+                    logger: logger
+                )
+                if count > 0 {
+                    logger.info("post-login catchup: \(email) generated \(count) explainers")
+                    await AuthFileLogger.shared.append(
+                        "post-login catchup: \(email) generated \(count) explainers",
+                        level: "info"
+                    )
+                }
+            } catch {
+                logger.error("post-login catchup: \(email) failed: \(error)")
+            }
+        }
         return req.redirect(to: target)
     }
 

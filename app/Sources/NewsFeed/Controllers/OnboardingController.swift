@@ -61,6 +61,7 @@ struct OnboardingController {
         let logger = req.logger
         let email = user.email
         Task.detached {
+            // Phase A: per-user LLM rerank — gets card text personalized.
             do {
                 let count = try await rescoreUser(
                     userID: userID,
@@ -72,6 +73,27 @@ struct OnboardingController {
                 await OnboardingFileLogger.shared.append(msg, level: "info")
             } catch {
                 let msg = "post-onboard rescore: \(email) failed: \(String(reflecting: error))"
+                logger.error("\(msg)")
+                await OnboardingFileLogger.shared.append(msg, level: "error")
+                return
+            }
+
+            // Phase B: pre-generate catchup HTML for the top items this user is
+            // about to see. Runs sequentially after rescore so the "top" query
+            // uses fresh per-user scores. First explainer ready in ~30s, the
+            // user can refresh and click instead of seeing "generating in
+            // background".
+            do {
+                let count = try await catchupTopItemsForUser(
+                    userID: userID,
+                    application: app,
+                    logger: logger
+                )
+                let msg = "post-onboard catchup: \(email) generated \(count) explainers"
+                logger.info("\(msg)")
+                await OnboardingFileLogger.shared.append(msg, level: "info")
+            } catch {
+                let msg = "post-onboard catchup: \(email) failed: \(String(reflecting: error))"
                 logger.error("\(msg)")
                 await OnboardingFileLogger.shared.append(msg, level: "error")
             }
