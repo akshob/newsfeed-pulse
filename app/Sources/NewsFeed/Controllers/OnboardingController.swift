@@ -33,7 +33,7 @@ struct OnboardingController {
         guard !blurb.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return req.redirect(to: "/onboarding?err=empty")
         }
-        try await upsertUserProfile(userID: try user.requireID(), blurb: blurb, on: req)
+        try await upsertUserProfile(userID: try user.requireID(), newBlurb: blurb, on: req)
         return req.redirect(to: "/?msg=interests_saved")
     }
 }

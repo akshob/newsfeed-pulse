@@ -11,11 +11,12 @@ struct FeedController {
     // GET /
     func feedHome(req: Request) async throws -> Response {
         let user = try req.auth.require(User.self)
+        let userID = try user.requireID()
         let profile = try await UserProfile.query(on: req.db)
-            .filter(\.$user.$id == user.requireID()).first()
+            .filter(\.$user.$id == userID).first()
         if profile == nil { return req.redirect(to: "/onboarding") }
 
-        let items = try await loadRankedFeed(on: req, limit: 25)
+        let items = try await loadRankedFeed(on: req, userID: userID, limit: 25)
         let lastIngestAt = try await loadLastIngestAt(on: req)
         return htmlResponse(FeedView.render(
             items: items,
@@ -28,7 +29,8 @@ struct FeedController {
     // GET /raw
     func feedRaw(req: Request) async throws -> Response {
         let user = try req.auth.require(User.self)
-        let items = try await loadRankedFeed(on: req, limit: 50, orderByScore: false)
+        let userID = try user.requireID()
+        let items = try await loadRankedFeed(on: req, userID: userID, limit: 50, orderByScore: false)
         let lastIngestAt = try await loadLastIngestAt(on: req)
         return htmlResponse(FeedView.render(
             items: items,

@@ -31,12 +31,23 @@ struct CaptureController {
             return req.redirect(to: "/capture?msg=empty")
         }
         let hint = form.source_hint?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let userID = try user.requireID()
         let capture = Capture(
-            userID: try user.requireID(),
+            userID: userID,
             content: content,
             sourceHint: hint?.isEmpty == true ? nil : hint
         )
         try await capture.save(on: req.db)
+
+        // Recompute the user's profile embedding so this capture starts
+        // influencing ranking on the next page load. The blurb stays as-is;
+        // captures bias the embedding toward whatever they just heard.
+        // Errors here don't block the save — capture is the user-visible win.
+        do {
+            try await upsertUserProfile(userID: userID, on: req)
+        } catch {
+            req.logger.error("capture: profile re-embed failed: \(error)")
+        }
 
         if req.headers.contentType == .json ||
            req.headers.first(name: .accept)?.contains("application/json") == true {

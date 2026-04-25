@@ -29,16 +29,72 @@ func composeBlurb(categories: [String], freeform: String) -> String {
     return parts.joined(separator: "\n\n")
 }
 
-/// Insert or update the user's `user_profiles` row: store the blurb and its
-/// Ollama-generated embedding as a pgvector column.
-func upsertUserProfile(userID: UUID, blurb: String, on req: Request) async throws {
-    let ollama = OllamaClient(client: req.client)
-    let embedding = try await ollama.embed(text: blurb)
+/// Lightweight value type used by `composeUserEmbeddingText` so tests can
+/// exercise the formatting without depending on Fluent.
+struct CaptureSummary {
+    let content: String
+    let sourceHint: String?
+}
+
+/// Combine the user's interest blurb with their recent captures into a single
+/// text passed to the embedder. Captures bias the user's vector toward what
+/// they've recently mentioned hearing about — closing the "I heard from wife"
+/// loop into ranking.
+func composeUserEmbeddingText(blurb: String, recentCaptures: [CaptureSummary]) -> String {
+    var parts: [String] = []
+    let trimmedBlurb = blurb.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmedBlurb.isEmpty { parts.append(trimmedBlurb) }
+    if !recentCaptures.isEmpty {
+        var section = "Recently I've been hearing about:"
+        for c in recentCaptures.prefix(20) {
+            let line = c.content.replacingOccurrences(of: "\n", with: " ")
+            if let hint = c.sourceHint?.trimmingCharacters(in: .whitespacesAndNewlines), !hint.isEmpty {
+                section += "\n- (\(hint)) \(line)"
+            } else {
+                section += "\n- \(line)"
+            }
+        }
+        parts.append(section)
+    }
+    return parts.joined(separator: "\n\n")
+}
+
+/// Insert or update the user's `user_profiles` row.
+///
+/// - If `newBlurb` is supplied (onboarding form submit), the blurb is replaced.
+///   Otherwise the existing blurb is preserved.
+/// - The embedding is always recomputed from blurb + recent captures so the
+///   user's vector drifts toward their recent "heard from..." inputs.
+func upsertUserProfile(userID: UUID, newBlurb: String? = nil, on req: Request) async throws {
     guard let sql = req.db as? any SQLDatabase else {
         throw Abort(.internalServerError, reason: "expected SQLDatabase")
     }
+
     let existing = try await UserProfile.query(on: req.db)
         .filter(\.$user.$id == userID).first()
+
+    let blurb: String
+    if let newBlurb = newBlurb {
+        blurb = newBlurb
+    } else if let existing = existing {
+        blurb = existing.blurb
+    } else {
+        // No newBlurb provided AND no existing profile — nothing meaningful
+        // to embed. Skip silently (the capture row is still saved).
+        return
+    }
+
+    let captures = try await Capture.query(on: req.db)
+        .filter(\.$user.$id == userID)
+        .sort(\.$capturedAt, .descending)
+        .limit(20)
+        .all()
+        .map { CaptureSummary(content: $0.content, sourceHint: $0.sourceHint) }
+
+    let embedText = composeUserEmbeddingText(blurb: blurb, recentCaptures: captures)
+    let ollama = OllamaClient(client: req.client)
+    let embedding = try await ollama.embed(text: embedText)
+
     if let existing = existing, let existingID = existing.id {
         try await sql.raw("""
             UPDATE user_profiles
