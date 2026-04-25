@@ -14,7 +14,7 @@ struct CatchupCommand: AsyncCommand {
     struct Signature: CommandSignature {
         @Argument(name: "item_id", help: "feed_items.id (UUID) to generate the explainer for")
         var itemID: String
-        @Option(name: "model", help: "Chat model name; falls back to OLLAMA_CHAT_MODEL env, else llama3.2:3b")
+        @Option(name: "model", help: "Chat model name; falls back to OLLAMA_CHAT_MODEL env, else qwen2.5:7b")
         var model: String?
         @Flag(name: "force", help: "Regenerate even if catchup_html is already set")
         var force: Bool
@@ -33,7 +33,7 @@ struct CatchupCommand: AsyncCommand {
         let ollama = OllamaClient(client: app.client)
         let model = signature.model
             ?? Environment.get("OLLAMA_CHAT_MODEL")
-            ?? "llama3.2:3b"
+            ?? "qwen2.5:7b"
 
         struct Row: Decodable {
             let title: String

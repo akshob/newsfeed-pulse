@@ -7,7 +7,7 @@ struct ScoreCommand: AsyncCommand {
     struct Signature: CommandSignature {
         @Option(name: "limit", short: "n", help: "Max items to score this run (default 100)")
         var limit: Int?
-        @Option(name: "model", help: "Chat model for rerank (default llama3.2:3b)")
+        @Option(name: "model", help: "Chat model for rerank (default qwen2.5:7b)")
         var model: String?
     }
 
@@ -21,7 +21,7 @@ struct ScoreCommand: AsyncCommand {
         let limit = signature.limit ?? 100
         let model = signature.model
             ?? Environment.get("OLLAMA_CHAT_MODEL")
-            ?? "llama3.2:3b"
+            ?? "qwen2.5:7b"
         let ollama = OllamaClient(client: app.client)
         context.console.print("score: using chat model \(model)")
 

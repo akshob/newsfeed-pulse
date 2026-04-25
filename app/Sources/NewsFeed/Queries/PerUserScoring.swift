@@ -30,7 +30,7 @@ func rescoreUser(
     let ollama = OllamaClient(client: application.client)
     let model = overrideModel
         ?? Environment.get("OLLAMA_CHAT_MODEL")
-        ?? "llama3.2:3b"
+        ?? "qwen2.5:7b"
 
     struct UserRow: Decodable {
         let email: String
