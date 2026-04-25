@@ -11,6 +11,7 @@ struct CreateInviteCommand: AsyncCommand {
         let code = generateInviteCode()
         let invite = Invite(code: code)
         try await invite.save(on: app.db)
+        await AuthFileLogger.shared.append("invite/create: code=\(code) source=cli", level: "info")
         context.console.print("")
         context.console.print("✓ invite code:  \(code)")
         context.console.print("  share URL:    https://pulse.akshob.com/signup?code=\(code)")

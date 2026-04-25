@@ -41,6 +41,7 @@ public func configure(_ app: Application) async throws {
     app.asyncCommands.use(ScoreCommand(), as: "score")
     app.asyncCommands.use(CatchupAllCommand(), as: "catchup-all")
     app.asyncCommands.use(CreateInviteCommand(), as: "create-invite")
+    app.asyncCommands.use(ReleaseInviteCommand(), as: "release-invite")
 
     // Sessions + authentication middleware. Sessions first, then the User
     // authenticator that reads session → User. Routes opt in to protection
