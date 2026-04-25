@@ -4,15 +4,15 @@
 # Pass the chat model as $1 (defaults to llama3.2:3b). Embeddings always
 # use nomic-embed-text regardless.
 #
-# Timestamped per-run logs at /mnt/butterscotch/newsfeed/logs/ingest/
+# Timestamped per-run logs at /mnt/butterscotch/newsfeed-pulse/logs/ingest/
 # flock prevents overlapping runs across both the daytime and overnight
 # crontab entries.
 set -e
 
 MODEL="${1:-llama3.2:3b}"
 
-APP_DIR=/mnt/butterscotch/newsfeed/app
-LOG_DIR=/mnt/butterscotch/newsfeed/logs/ingest
+APP_DIR=/mnt/butterscotch/newsfeed-pulse/app
+LOG_DIR=/mnt/butterscotch/newsfeed-pulse/logs/ingest
 
 mkdir -p "$LOG_DIR"
 find "$LOG_DIR" -name 'ingest-*.log' -type f -mtime +30 -delete 2>/dev/null || true

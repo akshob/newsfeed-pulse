@@ -7,9 +7,9 @@ Wants=network-online.target
 Type=simple
 User=akshobg
 Group=akshobg
-WorkingDirectory=/mnt/butterscotch/newsfeed/app
-EnvironmentFile=/mnt/butterscotch/newsfeed/app/.env
-ExecStart=/mnt/butterscotch/newsfeed/app/.build/release/NewsFeed serve --hostname 127.0.0.1 --port 8080
+WorkingDirectory=/mnt/butterscotch/newsfeed-pulse/app
+EnvironmentFile=/mnt/butterscotch/newsfeed-pulse/app/.env
+ExecStart=/mnt/butterscotch/newsfeed-pulse/app/.build/release/NewsFeed serve --hostname 127.0.0.1 --port 8080
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
@@ -19,7 +19,7 @@ StandardError=journal
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/mnt/butterscotch/newsfeed
+ReadWritePaths=/mnt/butterscotch/newsfeed-pulse
 PrivateTmp=true
 
 [Install]
