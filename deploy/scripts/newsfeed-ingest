@@ -1,8 +1,15 @@
 #!/bin/bash
-# /usr/local/bin/newsfeed-ingest — hourly pipeline: ingest → score → catchup-all
+# /usr/local/bin/newsfeed-ingest [model-name]
+# Hourly pipeline: ingest → score → catchup-all.
+# Pass the chat model as $1 (defaults to llama3.2:3b). Embeddings always
+# use nomic-embed-text regardless.
+#
 # Timestamped per-run logs at /mnt/butterscotch/newsfeed/logs/ingest/
-# flock prevents overlapping runs (pipeline can exceed one hour under load)
+# flock prevents overlapping runs across both the daytime and overnight
+# crontab entries.
 set -e
+
+MODEL="${1:-llama3.2:3b}"
 
 APP_DIR=/mnt/butterscotch/newsfeed/app
 LOG_DIR=/mnt/butterscotch/newsfeed/logs/ingest
@@ -16,7 +23,7 @@ LOG="$LOG_DIR/ingest-$TS.log"
 cd "$APP_DIR"
 ln -sfn "$LOG" "$LOG_DIR/latest.log"
 
-# Prevent overlapping runs
+# Prevent overlapping runs (one shared lock across both crontab entries)
 exec 9>/tmp/newsfeed-pipeline.lock
 if ! flock -n 9; then
   echo "$(date -Iseconds) previous pipeline still running, skipping" >> "$LOG"
@@ -24,7 +31,7 @@ if ! flock -n 9; then
 fi
 
 exec >> "$LOG" 2>&1
-echo "=== $(date -Iseconds) pipeline starting (pid $$) ==="
+echo "=== $(date -Iseconds) pipeline starting (pid $$, model=$MODEL) ==="
 
 echo ''
 echo '--- ingest ---'
@@ -32,11 +39,11 @@ echo '--- ingest ---'
 
 echo ''
 echo '--- score ---'
-./.build/release/NewsFeed score --limit 100 || echo '(score failed, continuing)'
+./.build/release/NewsFeed score --limit 100 --model "$MODEL" || echo '(score failed, continuing)'
 
 echo ''
 echo '--- catchup-all ---'
-./.build/release/NewsFeed catchup-all --limit 50 || echo '(catchup-all failed, continuing)'
+./.build/release/NewsFeed catchup-all --limit 50 --model "$MODEL" || echo '(catchup-all failed, continuing)'
 
 echo ''
 echo "=== $(date -Iseconds) pipeline done ==="
