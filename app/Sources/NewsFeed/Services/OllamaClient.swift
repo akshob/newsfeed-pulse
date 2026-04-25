@@ -2,14 +2,23 @@ import Foundation
 import Vapor
 
 // Thin HTTP wrapper around Ollama's embed and chat endpoints.
-// Defaults assume Ollama is running on the same box at :11434.
+//
+// We route embeddings and chat to (potentially) different hosts so user-facing
+// paths (onboarding, capture) don't depend on the heavy chat box. Typical prod:
+//   OLLAMA_EMBED_BASE_URL = http://localhost:11434   (small embedder on hydrogen)
+//   OLLAMA_BASE_URL       = http://oxygen.local:11434 (chat models on M1 Max)
+// Either var alone falls through to the other, then to localhost — so dev with
+// a single Ollama keeps working unchanged.
 struct OllamaClient {
     let client: any Client
-    let baseURL: String
+    let embedBaseURL: String
+    let chatBaseURL: String
 
-    init(client: any Client, baseURL: String? = nil) {
+    init(client: any Client, embedBaseURL: String? = nil, chatBaseURL: String? = nil) {
         self.client = client
-        self.baseURL = baseURL ?? Environment.get("OLLAMA_BASE_URL") ?? "http://localhost:11434"
+        let fallback = Environment.get("OLLAMA_BASE_URL") ?? "http://localhost:11434"
+        self.embedBaseURL = embedBaseURL ?? Environment.get("OLLAMA_EMBED_BASE_URL") ?? fallback
+        self.chatBaseURL = chatBaseURL ?? Environment.get("OLLAMA_CHAT_BASE_URL") ?? fallback
     }
 
     // MARK: - Embeddings
@@ -23,7 +32,7 @@ struct OllamaClient {
     }
 
     func embed(model: String = "nomic-embed-text", text: String) async throws -> [Double] {
-        let resp = try await client.post(URI(string: "\(baseURL)/api/embed")) { req in
+        let resp = try await client.post(URI(string: "\(embedBaseURL)/api/embed")) { req in
             try req.content.encode(EmbedRequest(model: model, input: text))
         }
         guard resp.status == .ok else {
@@ -71,7 +80,7 @@ struct OllamaClient {
         }
         messages.append(ChatMessage(role: "user", content: user))
 
-        let resp = try await client.post(URI(string: "\(baseURL)/api/chat")) { req in
+        let resp = try await client.post(URI(string: "\(chatBaseURL)/api/chat")) { req in
             try req.content.encode(ChatRequest(
                 model: model,
                 messages: messages,
