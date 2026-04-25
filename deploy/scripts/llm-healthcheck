@@ -66,4 +66,8 @@ case "$CHAT" in
     *)   LOADED="?" ;;
 esac
 
-echo "$NOW embed=$EMBED chat=$CHAT loaded=$LOADED" >> "$LOG"
+# Strip http:// for compactness in the log line
+EMBED_HOST="${EMBED_URL#http://}"
+CHAT_HOST="${CHAT_URL#http://}"
+
+echo "$NOW embed[$EMBED_HOST]=$EMBED chat[$CHAT_HOST]=$CHAT loaded=$LOADED" >> "$LOG"
