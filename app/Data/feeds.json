@@ -1,10 +1,15 @@
 [
-  { "name": "Hacker News",         "url": "https://news.ycombinator.com/rss",               "lane": "tech"         },
-  { "name": "Simon Willison",      "url": "https://simonwillison.net/atom/everything/",     "lane": "tech"         },
-  { "name": "Ars Technica",        "url": "https://feeds.arstechnica.com/arstechnica/index","lane": "tech"         },
-  { "name": "Axios",               "url": "https://www.axios.com/feeds/feed.rss",           "lane": "conversation" },
-  { "name": "Politico Playbook",   "url": "https://www.politico.com/rss/playbook.xml",      "lane": "conversation" },
-  { "name": "NPR",                 "url": "https://feeds.npr.org/1001/rss.xml",             "lane": "conversation" },
-  { "name": "BBC World",           "url": "https://feeds.bbci.co.uk/news/world/rss.xml",    "lane": "conversation" },
-  { "name": "Reddit OutOfTheLoop", "url": "https://www.reddit.com/r/OutOfTheLoop/.rss",     "lane": "conversation" }
+  { "name": "Hacker News",         "url": "https://news.ycombinator.com/rss",                            "lane": "tech"         },
+  { "name": "Simon Willison",      "url": "https://simonwillison.net/atom/everything/",                  "lane": "tech"         },
+  { "name": "Ars Technica",        "url": "https://feeds.arstechnica.com/arstechnica/index",             "lane": "tech"         },
+  { "name": "Quanta Magazine",     "url": "https://www.quantamagazine.org/feed/",                        "lane": "tech"         },
+  { "name": "Axios",               "url": "https://www.axios.com/feeds/feed.rss",                        "lane": "conversation" },
+  { "name": "Politico Playbook",   "url": "https://www.politico.com/rss/playbook.xml",                   "lane": "conversation" },
+  { "name": "NPR",                 "url": "https://feeds.npr.org/1001/rss.xml",                          "lane": "conversation" },
+  { "name": "BBC World",           "url": "https://feeds.bbci.co.uk/news/world/rss.xml",                 "lane": "conversation" },
+  { "name": "Reddit OutOfTheLoop", "url": "https://www.reddit.com/r/OutOfTheLoop/.rss",                  "lane": "conversation" },
+  { "name": "NYT Politics",        "url": "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml",   "lane": "conversation" },
+  { "name": "NYT Business",        "url": "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",   "lane": "conversation" },
+  { "name": "NYT Health",          "url": "https://rss.nytimes.com/services/xml/rss/nyt/Health.xml",     "lane": "conversation" },
+  { "name": "NYT Science",         "url": "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml",    "lane": "conversation" }
 ]

@@ -30,31 +30,41 @@ struct ScoreCommand: AsyncCommand {
         }
         context.console.print("score: sql ready")
 
-        // 1. Ensure interest profile embedding exists and matches current blurb
+        // 1. Ensure interest profile embedding exists and matches current blurb.
+        // The returned profile_updated_at is what we compare item_scores.scored_at
+        // against to detect rows that need to be re-rescored after a blurb change.
         let profileEmbedding: [Double]
+        let profileUpdatedAt: Date?
         do {
-            profileEmbedding = try await ensureProfileEmbedding(app: app, ollama: ollama, sql: sql)
+            (profileEmbedding, profileUpdatedAt) = try await ensureProfileEmbedding(
+                app: app, ollama: ollama, sql: sql
+            )
         } catch {
             context.console.error("score: profile embed failed: \(error)")
             throw error
         }
         context.console.print("profile embedding ready (dim=\(profileEmbedding.count))")
 
-        // 2. Phase 1 — global scoring of un-scored items (embed + dedup + fallback rerank)
-        context.console.print("score: phase 1 — global scoring of un-scored items")
-        let rows: [UnScoredRow]
+        // 2. Phase 1 — global scoring of items lacking a fresh global score.
+        // "Stale" includes both never-scored AND scored-before-blurb-change.
+        context.console.print("score: phase 1 — global scoring")
+        let rows: [ScoringItemRow]
         do {
             rows = try await sql.raw("""
-                SELECT fi.id AS id, fi.title AS title, fi.body AS body, fs.name AS source_name, fs.lane AS source_lane
+                SELECT fi.id AS id, fi.title AS title, fi.body AS body,
+                       fs.name AS source_name, fs.lane AS source_lane
                 FROM feed_items fi
                 JOIN feed_sources fs ON fi.source_id = fs.id
                 LEFT JOIN item_scores isc ON isc.item_id = fi.id
                 WHERE isc.id IS NULL
+                   OR (isc.scored_at IS NOT NULL
+                       AND \(bind: profileUpdatedAt) IS NOT NULL
+                       AND isc.scored_at < \(bind: profileUpdatedAt))
                 ORDER BY fi.fetched_at DESC
                 LIMIT \(bind: limit)
-                """).all(decoding: UnScoredRow.self)
+                """).all(decoding: ScoringItemRow.self)
         } catch {
-            context.console.error("score: un-scored query failed: \(error)")
+            context.console.error("score: stale-item query failed: \(error)")
             throw error
         }
 
@@ -80,49 +90,34 @@ struct ScoreCommand: AsyncCommand {
         }
         context.console.print("  phase 1 done: \(scored)/\(rows.count) scored")
 
-        // 3. Phase 2 — per-user LLM rerank for items lacking a fresh user-side score.
+        // 3. Phase 2 — per-user rerank for items lacking a fresh user-side score.
         // Each user's blurb (from user_profiles.blurb) drives a separate rerank
-        // so the displayed tldr/why_this/relevance reflect that specific user's
-        // interests rather than the owner's global interests.md.
-        try await scorePerUser(
+        // so the displayed tldr/why_this/relevance reflect that specific user.
+        // Same logic also runs from OnboardingController right after onboarding.
+        try await scorePerUserAcrossAllUsers(
             app: app,
-            ollama: ollama,
-            model: model,
             sql: sql,
+            model: model,
             context: context
         )
     }
 
-    // MARK: - Phase 2: per-user scoring
+    // MARK: - Phase 2 wrapper (loops users, delegates to rescoreUser)
 
     private struct UserToScore: Decodable {
         let user_id: UUID
         let email: String
-        let blurb: String
-        let profile_updated_at: Date?
     }
 
-    private struct PerUserItemRow: Decodable {
-        let id: UUID
-        let title: String
-        let body: String?
-        let source_name: String
-        let source_lane: String
-    }
-
-    private func scorePerUser(
+    private func scorePerUserAcrossAllUsers(
         app: Application,
-        ollama: OllamaClient,
-        model: String,
         sql: any SQLDatabase,
+        model: String,
         context: CommandContext
     ) async throws {
         context.console.print("score: phase 2 — per-user scoring")
-
-        // Active users with a profile we can score against. No blurb → skip.
         let users = try await sql.raw("""
-            SELECT u.id AS user_id, u.email AS email,
-                   p.blurb AS blurb, p.updated_at AS profile_updated_at
+            SELECT u.id AS user_id, u.email AS email
             FROM users u
             JOIN user_profiles p ON p.user_id = u.id
             WHERE p.blurb IS NOT NULL AND length(p.blurb) > 0
@@ -131,104 +126,47 @@ struct ScoreCommand: AsyncCommand {
         context.console.print("  \(users.count) users with profiles")
 
         for user in users {
-            // Items eligible for per-user scoring:
-            //   - already globally scored (so we have an embedding + dedup decision)
-            //   - not a duplicate
-            //   - recent enough that the score is worth computing (< 7 days)
-            //   - either no per-user score yet, OR the user's per-item score is
-            //     older than their current profile (blurb changed → stale)
-            let items: [PerUserItemRow] = try await sql.raw("""
-                SELECT fi.id AS id, fi.title AS title, fi.body AS body,
-                       fs.name AS source_name, fs.lane AS source_lane
-                FROM feed_items fi
-                JOIN feed_sources fs ON fi.source_id = fs.id
-                JOIN item_scores isc ON isc.item_id = fi.id
-                LEFT JOIN user_item_scores uis
-                  ON uis.item_id = fi.id AND uis.user_id = \(bind: user.user_id)
-                WHERE isc.dup_of_item_id IS NULL
-                  AND fi.fetched_at > NOW() - INTERVAL '7 days'
-                  AND (
-                    uis.id IS NULL
-                    OR (uis.scored_at IS NOT NULL
-                        AND \(bind: user.profile_updated_at) IS NOT NULL
-                        AND uis.scored_at < \(bind: user.profile_updated_at))
-                  )
-                ORDER BY fi.fetched_at DESC
-                LIMIT 200
-                """).all(decoding: PerUserItemRow.self)
-
-            context.console.print("  user \(user.email): \(items.count) items to score")
-
-            var done = 0
-            for item in items {
-                do {
-                    let bodyClean = item.body.map(stripTags) ?? ""
-                    let row = UnScoredRow(
-                        id: item.id, title: item.title, body: item.body,
-                        source_name: item.source_name, source_lane: item.source_lane
-                    )
-                    let rerank = await llmRerank(
-                        ollama: ollama, model: model,
-                        blurb: user.blurb, row: row, body: bodyClean
-                    )
-                    try await sql.raw("""
-                        INSERT INTO user_item_scores
-                          (id, user_id, item_id, relevance_score, tldr, why_this, lane, scored_at)
-                        VALUES
-                          (\(bind: UUID()),
-                           \(bind: user.user_id),
-                           \(bind: item.id),
-                           \(bind: rerank.relevanceScore),
-                           \(bind: rerank.tldr),
-                           \(bind: rerank.whyThis),
-                           \(bind: rerank.lane ?? item.source_lane),
-                           NOW())
-                        ON CONFLICT (user_id, item_id) DO UPDATE SET
-                          relevance_score = EXCLUDED.relevance_score,
-                          tldr = EXCLUDED.tldr,
-                          why_this = EXCLUDED.why_this,
-                          lane = EXCLUDED.lane,
-                          scored_at = EXCLUDED.scored_at
-                        """).run()
-                    done += 1
-                    if done % 10 == 0 {
-                        context.console.print("    \(user.email): \(done)/\(items.count)")
-                    }
-                } catch {
-                    context.console.error("    [\(user.email)/\(item.title.prefix(40))] error: \(error)")
-                }
+            do {
+                _ = try await rescoreUser(
+                    userID: user.user_id,
+                    application: app,
+                    logger: app.logger,
+                    model: model
+                )
+            } catch {
+                context.console.error("  [\(user.email)] phase 2 failed: \(error)")
             }
-            context.console.print("  user \(user.email): scored \(done)/\(items.count)")
         }
     }
 
-    // MARK: - Single item
+    // MARK: - Single global item
 
     private func scoreOne(
-        row: UnScoredRow,
+        row: ScoringItemRow,
         blurb: String,
         profileEmbedding: [Double],
         ollama: OllamaClient,
         model: String,
         sql: any SQLDatabase
     ) async throws {
-        // Build text to embed — title is highest signal, body adds context
+        // Build text to embed — title is highest signal, body adds context.
+        // Re-embedding on rescore is wasteful but cheap (nomic on localhost,
+        // ~150ms each, deterministic) — keeping the path uniform for now.
         let bodyClean = row.body.map(stripTags) ?? ""
         let embedText = "\(row.title)\n\n\(bodyClean.prefix(800))"
 
         let itemEmbedding = try await ollama.embed(text: embedText)
         let similarity = cosineSimilarity(profileEmbedding, itemEmbedding)
 
-        // Dedup against the recent cluster heads. We exclude rows that are
-        // already marked as duplicates so chains can't form (B→A, C→B);
-        // every member of a cluster points at the same head.
+        // Dedup against the recent cluster heads. Excludes already-marked
+        // duplicates so chains can't form (B→A, C→B); every cluster member
+        // points at the same head.
         let dupOfItemID = try await findDuplicate(
             embedding: itemEmbedding,
             excludingItemID: row.id,
             sql: sql
         )
 
-        // LLM rerank + TLDR + why_this + lane
         let rerank = await llmRerank(
             ollama: ollama,
             model: model,
@@ -237,6 +175,11 @@ struct ScoreCommand: AsyncCommand {
             body: bodyClean
         )
 
+        // UPSERT so re-rescore (after blurb change) updates in place rather
+        // than failing on the UNIQUE(item_id) constraint. dup_of_item_id is
+        // intentionally NOT in the SET clause — the dedup decision is based
+        // on cosine similarity which doesn't depend on the blurb, so the
+        // existing cluster head stays stable across rescores.
         try await sql.raw("""
             INSERT INTO item_scores
               (id, item_id, embedding, similarity, relevance_score, tldr, why_this, lane, dup_of_item_id, scored_at)
@@ -251,6 +194,14 @@ struct ScoreCommand: AsyncCommand {
                \(bind: rerank.lane ?? row.sourceLane),
                \(bind: dupOfItemID),
                NOW())
+            ON CONFLICT (item_id) DO UPDATE SET
+              embedding = EXCLUDED.embedding,
+              similarity = EXCLUDED.similarity,
+              relevance_score = EXCLUDED.relevance_score,
+              tldr = EXCLUDED.tldr,
+              why_this = EXCLUDED.why_this,
+              lane = EXCLUDED.lane,
+              scored_at = EXCLUDED.scored_at
             """).run()
     }
 
@@ -261,9 +212,6 @@ struct ScoreCommand: AsyncCommand {
         let distance: Double
     }
 
-    /// Nearest scored item within the recency window, restricted to cluster
-    /// heads. Returns the canonical item id when the cosine distance is
-    /// within threshold, otherwise nil (this item starts a fresh cluster).
     private func findDuplicate(
         embedding: [Double],
         excludingItemID: UUID,
@@ -285,75 +233,15 @@ struct ScoreCommand: AsyncCommand {
         return canonicalIDFromNeighbors(neighbors.map { ($0.id, $0.distance) })
     }
 
-    // MARK: - LLM rerank
+    // MARK: - Interest profile (global blurb)
 
-    private struct RerankResult {
-        let relevanceScore: Int
-        let tldr: String
-        let whyThis: String
-        let lane: String?
-    }
-
-    private struct RerankJSON: Codable {
-        let relevance_score: Int?
-        let tldr: String?
-        let why_this: String?
-        let lane: String?
-    }
-
-    private func llmRerank(
-        ollama: OllamaClient,
-        model: String,
-        blurb: String,
-        row: UnScoredRow,
-        body: String
-    ) async -> RerankResult {
-        let system = "You are a news item evaluator. Output ONLY a JSON object with no prose."
-        let userMsg = """
-        USER INTEREST PROFILE:
-        \(blurb)
-
-        NEWS ITEM:
-        Title: \(row.title)
-        Source: \(row.sourceName) (lane: \(row.sourceLane))
-        Body (excerpt): \(body.prefix(1500))
-
-        Score this item for this specific user. Return ONLY a JSON object with these keys:
-        - relevance_score: integer 1-10 (1=skip, 10=must-read for this user)
-        - tldr: 1-2 sentence summary (max 220 chars, plain text, no markdown)
-        - why_this: single short sentence explaining why it fits this user's interests
-        - lane: "tech" or "conversation" — which of user's two interest lanes this serves
-
-        JSON only, no markdown fences.
-        """
-        do {
-            let raw = try await ollama.chat(
-                model: model,
-                system: system,
-                user: userMsg,
-                jsonMode: true,
-                temperature: 0.2
-            )
-            let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let data = cleaned.data(using: .utf8),
-               let parsed = try? JSONDecoder().decode(RerankJSON.self, from: data) {
-                let score = max(1, min(10, parsed.relevance_score ?? 5))
-                let tldr = (parsed.tldr ?? row.title).trimmingCharacters(in: .whitespacesAndNewlines)
-                let why  = (parsed.why_this ?? "relevant to your interests").trimmingCharacters(in: .whitespacesAndNewlines)
-                let lane = parsed.lane.map { $0 == "tech" ? "tech" : "conversation" }
-                return RerankResult(relevanceScore: score, tldr: tldr, whyThis: why, lane: lane)
-            }
-        } catch {
-            // Fall through to fallback
-        }
-        // Fallback: neutral score, use source lane, use title as TLDR
-        return RerankResult(relevanceScore: 5, tldr: row.title, whyThis: "from \(row.sourceName)", lane: row.sourceLane)
-    }
-
-    // MARK: - Interest profile
-
+    /// Reads the generic global-news evaluator profile. This file is committed
+    /// to the repo (unlike Data/interests.md which was historically gitignored
+    /// as the owner's personal blurb). The global blurb intentionally covers
+    /// all 7 onboarding categories evenly so brand-new users see a balanced
+    /// fallback feed before per-user scoring runs against their own blurb.
     private func loadBlurb(app: Application) throws -> String {
-        let path = app.directory.workingDirectory + "Data/interests.md"
+        let path = app.directory.workingDirectory + "Data/global_news_blurb.md"
         return try String(contentsOfFile: path, encoding: .utf8)
     }
 
@@ -361,23 +249,31 @@ struct ScoreCommand: AsyncCommand {
         app: Application,
         ollama: OllamaClient,
         sql: any SQLDatabase
-    ) async throws -> [Double] {
+    ) async throws -> (embedding: [Double], updatedAt: Date?) {
         let blurb = try loadBlurb(app: app)
 
-        // Load current stored profile (if any)
-        struct Row: Decodable { let id: UUID; let blurb: String; let embedding_text: String? }
+        struct Row: Decodable {
+            let id: UUID
+            let blurb: String
+            let embedding_text: String?
+            let updated_at: Date?
+        }
         let existing = try await sql.raw("""
-            SELECT id, blurb, embedding::text AS embedding_text
+            SELECT id, blurb, embedding::text AS embedding_text, updated_at
             FROM interest_profile
             ORDER BY updated_at DESC NULLS LAST
             LIMIT 1
             """).first(decoding: Row.self)
 
-        if let existing = existing, existing.blurb == blurb, let text = existing.embedding_text, let vec = parsePGVector(text) {
-            return vec
+        if let existing = existing,
+           existing.blurb == blurb,
+           let text = existing.embedding_text,
+           let vec = parsePGVector(text) {
+            return (vec, existing.updated_at)
         }
 
-        // Embed fresh
+        // Blurb changed (or no row yet) — re-embed and bump updated_at, which
+        // marks every existing item_scores row as stale on the next pass.
         let embedding = try await ollama.embed(text: blurb)
 
         if let existing = existing {
@@ -398,21 +294,8 @@ struct ScoreCommand: AsyncCommand {
                         1, NOW())
                 """).run()
         }
-        return embedding
-    }
-
-    // MARK: - Helpers
-
-    private struct UnScoredRow: Decodable {
-        let id: UUID
-        let title: String
-        let body: String?
-        let source_name: String
-        let source_lane: String
-
-        var sourceName: String { source_name }
-        var sourceLane: String { source_lane }
+        // We just wrote NOW() — round-trip would be more accurate but Date()
+        // here is within milliseconds and good enough for the staleness gate.
+        return (embedding, Date())
     }
 }
-
-// NOTE: parsePGVector moved to Helpers/VectorMath.swift; stripTags to Helpers/HTMLHelpers.swift.

@@ -52,6 +52,31 @@ struct OnboardingController {
             throw error
         }
         onboardingLog(req, "onboarding/submit: success for \(user.email)")
+
+        // Fire-and-forget per-user LLM rerank so the user starts seeing
+        // personalized cards within a few minutes instead of waiting for the
+        // top-of-hour cron tick. The Task captures `application` and `logger`
+        // (long-lived / value-typed); req itself is gone by the time it runs.
+        let app = req.application
+        let logger = req.logger
+        let email = user.email
+        Task.detached {
+            do {
+                let count = try await rescoreUser(
+                    userID: userID,
+                    application: app,
+                    logger: logger
+                )
+                let msg = "post-onboard rescore: \(email) scored \(count) items"
+                logger.info("\(msg)")
+                await OnboardingFileLogger.shared.append(msg, level: "info")
+            } catch {
+                let msg = "post-onboard rescore: \(email) failed: \(String(reflecting: error))"
+                logger.error("\(msg)")
+                await OnboardingFileLogger.shared.append(msg, level: "error")
+            }
+        }
+
         return req.redirect(to: "/?msg=interests_saved")
     }
 }
