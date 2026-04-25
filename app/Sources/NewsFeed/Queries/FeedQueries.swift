@@ -80,11 +80,12 @@ func loadRankedFeed(
         FROM feed_items fi
         JOIN feed_sources fs ON fi.source_id = fs.id
         LEFT JOIN item_scores isc ON isc.item_id = fi.id
-        WHERE (
-          SELECT event FROM engagements eng2
-            WHERE eng2.item_id = fi.id AND eng2.user_id = \(bind: userID)
-            ORDER BY eng2.created_at DESC LIMIT 1
-        ) IS DISTINCT FROM 'skip'
+        WHERE isc.dup_of_item_id IS NULL
+          AND (
+            SELECT event FROM engagements eng2
+              WHERE eng2.item_id = fi.id AND eng2.user_id = \(bind: userID)
+              ORDER BY eng2.created_at DESC LIMIT 1
+          ) IS DISTINCT FROM 'skip'
         \(unsafeRaw: orderClause)
         LIMIT \(bind: limit)
         """).all(decoding: RankedRow.self)

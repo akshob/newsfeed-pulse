@@ -98,6 +98,15 @@ struct ScoreCommand: AsyncCommand {
         let itemEmbedding = try await ollama.embed(text: embedText)
         let similarity = cosineSimilarity(profileEmbedding, itemEmbedding)
 
+        // Dedup against the recent cluster heads. We exclude rows that are
+        // already marked as duplicates so chains can't form (B→A, C→B);
+        // every member of a cluster points at the same head.
+        let dupOfItemID = try await findDuplicate(
+            embedding: itemEmbedding,
+            excludingItemID: row.id,
+            sql: sql
+        )
+
         // LLM rerank + TLDR + why_this + lane
         let rerank = await llmRerank(
             ollama: ollama,
@@ -109,7 +118,7 @@ struct ScoreCommand: AsyncCommand {
 
         try await sql.raw("""
             INSERT INTO item_scores
-              (id, item_id, embedding, similarity, relevance_score, tldr, why_this, lane, scored_at)
+              (id, item_id, embedding, similarity, relevance_score, tldr, why_this, lane, dup_of_item_id, scored_at)
             VALUES
               (\(bind: UUID()),
                \(bind: row.id),
@@ -119,8 +128,40 @@ struct ScoreCommand: AsyncCommand {
                \(bind: rerank.tldr),
                \(bind: rerank.whyThis),
                \(bind: rerank.lane ?? row.sourceLane),
+               \(bind: dupOfItemID),
                NOW())
             """).run()
+    }
+
+    // MARK: - Dedup
+
+    private struct DupNeighbor: Decodable {
+        let id: UUID
+        let distance: Double
+    }
+
+    /// Nearest scored item within the recency window, restricted to cluster
+    /// heads. Returns the canonical item id when the cosine distance is
+    /// within threshold, otherwise nil (this item starts a fresh cluster).
+    private func findDuplicate(
+        embedding: [Double],
+        excludingItemID: UUID,
+        sql: any SQLDatabase
+    ) async throws -> UUID? {
+        let vecLiteral = "'\(pgvectorLiteral(embedding))'::vector"
+        let recencyClause = "fi.fetched_at > NOW() - INTERVAL '\(DUP_RECENCY_HOURS) hours'"
+        let neighbors = try await sql.raw("""
+            SELECT fi.id AS id,
+                   (isc.embedding <=> \(unsafeRaw: vecLiteral)) AS distance
+            FROM item_scores isc
+            JOIN feed_items fi ON isc.item_id = fi.id
+            WHERE \(unsafeRaw: recencyClause)
+              AND isc.dup_of_item_id IS NULL
+              AND fi.id <> \(bind: excludingItemID)
+            ORDER BY isc.embedding <=> \(unsafeRaw: vecLiteral) ASC
+            LIMIT 1
+            """).all(decoding: DupNeighbor.self)
+        return canonicalIDFromNeighbors(neighbors.map { ($0.id, $0.distance) })
     }
 
     // MARK: - LLM rerank

@@ -18,6 +18,10 @@ final class ItemScore: Model, @unchecked Sendable {
     @OptionalField(key: "scored_at") var scoredAt: Date?
     @OptionalField(key: "catchup_html") var catchupHTML: String?
     @OptionalField(key: "catchup_generated_at") var catchupGeneratedAt: Date?
+    /// When non-nil, this score row is a duplicate of another feed_item's
+    /// cluster — populated by ScoreCommand and used by the feed query to
+    /// hide redundant cards. Writes go through raw SQL.
+    @OptionalField(key: "dup_of_item_id") var dupOfItemID: UUID?
 
     init() {}
 }
