@@ -25,6 +25,7 @@ func catchupTopItemsForUser(
     application: Application,
     logger: Logger,
     limit: Int = 10,
+    maxParallel: Int = 2,
     model overrideModel: String? = nil
 ) async throws -> Int {
     guard let sql = application.db as? any SQLDatabase else {
@@ -70,27 +71,47 @@ func catchupTopItemsForUser(
         logger.info("catchupTopItemsForUser: \(userID) — nothing pending")
         return 0
     }
-    logger.info("catchupTopItemsForUser: \(userID) — \(pending.count) explainers to generate")
+    logger.info("catchupTopItemsForUser: \(userID) — \(pending.count) explainers to generate (maxParallel=\(maxParallel))")
 
+    // Process in chunks of `maxParallel`. Each chunk fires a TaskGroup so the
+    // chat calls run in parallel client-side; oxygen's OLLAMA_NUM_PARALLEL
+    // controls how many GPU-batches in parallel server-side. Both layers
+    // need to match for actual throughput gain.
     var done = 0
-    for p in pending {
-        let started = Date()
-        do {
-            let html = try await buildExplainer(
-                ollama: ollama, model: model,
-                title: p.title, source: p.source_name, body: p.body
-            )
-            try await sql.raw("""
-                UPDATE item_scores
-                SET catchup_html = \(bind: html), catchup_generated_at = NOW()
-                WHERE item_id = \(bind: p.item_id)
-                """).run()
-            done += 1
-            let elapsed = Int(Date().timeIntervalSince(started) * 1000)
-            logger.info("catchupTopItemsForUser: \(userID) \(done)/\(pending.count) ok (\(elapsed)ms) [\(p.title.prefix(60))]")
-        } catch {
-            logger.error("catchupTopItemsForUser: \(userID) item \(p.item_id) failed: \(error)")
+    var i = 0
+    while i < pending.count {
+        let chunkEnd = Swift.min(i + maxParallel, pending.count)
+        let chunkDone = try await withThrowingTaskGroup(of: Bool.self) { group -> Int in
+            for j in i..<chunkEnd {
+                let p = pending[j]
+                group.addTask {
+                    let started = Date()
+                    do {
+                        let html = try await buildExplainer(
+                            ollama: ollama, model: model,
+                            title: p.title, source: p.source_name, body: p.body
+                        )
+                        try await sql.raw("""
+                            UPDATE item_scores
+                            SET catchup_html = \(bind: html), catchup_generated_at = NOW()
+                            WHERE item_id = \(bind: p.item_id)
+                            """).run()
+                        let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+                        logger.info("catchupTopItemsForUser: \(userID) ok (\(elapsed)ms) [\(p.title.prefix(60))]")
+                        return true
+                    } catch {
+                        logger.error("catchupTopItemsForUser: \(userID) item \(p.item_id) failed: \(error)")
+                        return false
+                    }
+                }
+            }
+            var count = 0
+            for try await ok in group { if ok { count += 1 } }
+            return count
         }
+        done += chunkDone
+        i = chunkEnd
+        logger.info("catchupTopItemsForUser: \(userID) progress \(done)/\(pending.count)")
     }
     return done
 }

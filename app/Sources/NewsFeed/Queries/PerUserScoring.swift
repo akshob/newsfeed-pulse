@@ -22,7 +22,8 @@ func rescoreUser(
     application: Application,
     logger: Logger,
     model overrideModel: String? = nil,
-    limit: Int = 200
+    limit: Int = 200,
+    maxParallel: Int = 2
 ) async throws -> Int {
     guard let sql = application.db as? any SQLDatabase else {
         throw Abort(.internalServerError, reason: "expected SQLDatabase")
@@ -70,43 +71,62 @@ func rescoreUser(
         LIMIT \(bind: limit)
         """).all(decoding: ScoringItemRow.self)
 
-    logger.info("rescoreUser: \(user.email) has \(items.count) items to rescore")
+    logger.info("rescoreUser: \(user.email) has \(items.count) items to rescore (maxParallel=\(maxParallel))")
 
+    let userBlurb = user.blurb
+    let userEmail = user.email
+
+    // Same chunked-TaskGroup pattern as catchupTopItemsForUser.
     var done = 0
-    for item in items {
-        do {
-            let bodyClean = item.body.map(stripTags) ?? ""
-            let rerank = await llmRerank(
-                ollama: ollama, model: model,
-                blurb: user.blurb, row: item, body: bodyClean
-            )
-            try await sql.raw("""
-                INSERT INTO user_item_scores
-                  (id, user_id, item_id, relevance_score, tldr, why_this, lane, scored_at)
-                VALUES
-                  (\(bind: UUID()),
-                   \(bind: userID),
-                   \(bind: item.id),
-                   \(bind: rerank.relevanceScore),
-                   \(bind: rerank.tldr),
-                   \(bind: rerank.whyThis),
-                   \(bind: rerank.lane ?? item.sourceLane),
-                   NOW())
-                ON CONFLICT (user_id, item_id) DO UPDATE SET
-                  relevance_score = EXCLUDED.relevance_score,
-                  tldr = EXCLUDED.tldr,
-                  why_this = EXCLUDED.why_this,
-                  lane = EXCLUDED.lane,
-                  scored_at = EXCLUDED.scored_at
-                """).run()
-            done += 1
-            if done % 10 == 0 {
-                logger.info("rescoreUser: \(user.email) progress \(done)/\(items.count)")
+    var i = 0
+    while i < items.count {
+        let chunkEnd = Swift.min(i + maxParallel, items.count)
+        let chunkDone = try await withThrowingTaskGroup(of: Bool.self) { group -> Int in
+            for j in i..<chunkEnd {
+                let item = items[j]
+                group.addTask {
+                    do {
+                        let bodyClean = item.body.map(stripTags) ?? ""
+                        let rerank = await llmRerank(
+                            ollama: ollama, model: model,
+                            blurb: userBlurb, row: item, body: bodyClean
+                        )
+                        try await sql.raw("""
+                            INSERT INTO user_item_scores
+                              (id, user_id, item_id, relevance_score, tldr, why_this, lane, scored_at)
+                            VALUES
+                              (\(bind: UUID()),
+                               \(bind: userID),
+                               \(bind: item.id),
+                               \(bind: rerank.relevanceScore),
+                               \(bind: rerank.tldr),
+                               \(bind: rerank.whyThis),
+                               \(bind: rerank.lane ?? item.sourceLane),
+                               NOW())
+                            ON CONFLICT (user_id, item_id) DO UPDATE SET
+                              relevance_score = EXCLUDED.relevance_score,
+                              tldr = EXCLUDED.tldr,
+                              why_this = EXCLUDED.why_this,
+                              lane = EXCLUDED.lane,
+                              scored_at = EXCLUDED.scored_at
+                            """).run()
+                        return true
+                    } catch {
+                        logger.error("rescoreUser: \(userEmail) item \(item.id) failed: \(error)")
+                        return false
+                    }
+                }
             }
-        } catch {
-            logger.error("rescoreUser: \(user.email) item \(item.id) failed: \(error)")
+            var count = 0
+            for try await ok in group { if ok { count += 1 } }
+            return count
+        }
+        done += chunkDone
+        i = chunkEnd
+        if done % 10 == 0 || i >= items.count {
+            logger.info("rescoreUser: \(userEmail) progress \(done)/\(items.count)")
         }
     }
-    logger.info("rescoreUser: \(user.email) done \(done)/\(items.count)")
+    logger.info("rescoreUser: \(userEmail) done \(done)/\(items.count)")
     return done
 }
