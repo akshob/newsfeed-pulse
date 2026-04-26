@@ -264,4 +264,13 @@ button.danger{background:#dc2626}
 .account-section.danger-zone h2{color:#dc2626}
 .btn-link{display:inline-block;padding:6px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px}
 .btn-link:hover{text-decoration:none;border-color:var(--accent)}
+
+/* Inferred-from-freeform chips on the onboarding form */
+.inferred-row{margin-top:4px;padding:12px 14px;border:1px dashed var(--border);border-radius:6px;background:transparent}
+.inferred-label{font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);font-weight:700;margin-bottom:8px}
+.inferred-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.inferred-hint{font-size:12px;color:var(--muted);font-style:italic}
+.tag{display:inline-block;padding:3px 10px;border-radius:14px;font-size:12px;font-weight:600;line-height:1.4}
+.tag-inferred{background:#eef5ff;color:#0d47a1;border:1px solid #cfe1ff}
+@media(prefers-color-scheme:dark){.tag-inferred{background:#0a1a2e;color:#60a5fa;border-color:#1e3a5f}}
 """

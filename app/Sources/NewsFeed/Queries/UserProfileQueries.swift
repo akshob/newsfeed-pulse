@@ -73,13 +73,14 @@ func upsertUserProfile(
     userID: UUID,
     newBlurb: String? = nil,
     newCategories: [String]? = nil,
+    newInferredCategories: [String]? = nil,
     newExcludedCategories: [String]? = nil,
     on req: Request
 ) async throws {
     guard let sql = req.db as? any SQLDatabase else {
         throw Abort(.internalServerError, reason: "expected SQLDatabase")
     }
-    contextualLog(req, "upsertUserProfile: user=\(userID) hasNewBlurb=\(newBlurb != nil) cats=\(newCategories?.count ?? -1) excludes=\(newExcludedCategories?.count ?? -1)")
+    contextualLog(req, "upsertUserProfile: user=\(userID) hasNewBlurb=\(newBlurb != nil) cats=\(newCategories?.count ?? -1) inferred=\(newInferredCategories?.count ?? -1) excludes=\(newExcludedCategories?.count ?? -1)")
 
     let existing = try await UserProfile.query(on: req.db)
         .filter(\.$user.$id == userID).first()
@@ -125,6 +126,10 @@ func upsertUserProfile(
     if let newCategories = newCategories {
         categoryAssign = ", categories = \(arrayLiteral(newCategories))"
     }
+    var inferredAssign = ""
+    if let newInferred = newInferredCategories {
+        inferredAssign = ", inferred_categories = \(arrayLiteral(newInferred))"
+    }
     var excludesAssign = ""
     if let newExcluded = newExcludedCategories {
         excludesAssign = ", excluded_categories = \(arrayLiteral(newExcluded))"
@@ -137,23 +142,26 @@ func upsertUserProfile(
                 embedding = \(unsafeRaw: "'\(pgvectorLiteral(embedding))'::vector"),
                 updated_at = NOW()
                 \(unsafeRaw: categoryAssign)
+                \(unsafeRaw: inferredAssign)
                 \(unsafeRaw: excludesAssign)
             WHERE id = \(bind: existingID)
             """).run()
         contextualLog(req, "upsertUserProfile: updated existing profile \(existingID)")
     } else {
-        // INSERT path: brand-new profile row. Always include both arrays
+        // INSERT path: brand-new profile row. Always include all three arrays
         // (default to empty rather than omit so the NOT NULL DEFAULT '{}'
         // takes effect predictably).
         let insertCats = newCategories ?? []
+        let insertInferred = newInferredCategories ?? []
         let insertExcludes = newExcludedCategories ?? []
         try await sql.raw("""
-            INSERT INTO user_profiles (id, user_id, blurb, embedding, categories, excluded_categories, updated_at)
+            INSERT INTO user_profiles (id, user_id, blurb, embedding, categories, inferred_categories, excluded_categories, updated_at)
             VALUES (\(bind: UUID()),
                     \(bind: userID),
                     \(bind: blurb),
                     \(unsafeRaw: "'\(pgvectorLiteral(embedding))'::vector"),
                     \(unsafeRaw: arrayLiteral(insertCats)),
+                    \(unsafeRaw: arrayLiteral(insertInferred)),
                     \(unsafeRaw: arrayLiteral(insertExcludes)),
                     NOW())
             """).run()

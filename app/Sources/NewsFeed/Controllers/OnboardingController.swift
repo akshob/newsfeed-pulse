@@ -58,10 +58,12 @@ struct OnboardingController {
         let profile = try await UserProfile.query(on: req.db)
             .filter(\.$user.$id == user.requireID()).first()
         let cats = profile?.categories ?? []
+        let inferred = profile?.inferredCategories ?? []
         let freeform = profile.map { freeformPart(of: $0.blurb) } ?? ""
         return htmlResponse(OnboardingView.render(
             email: user.email,
             currentCategories: cats,
+            currentInferredCategories: inferred,
             currentFreeform: freeform,
             message: try? req.query.get(String.self, at: "msg"),
             error: try? req.query.get(String.self, at: "err")
@@ -99,23 +101,17 @@ struct OnboardingController {
             return req.redirect(to: "/onboarding?err=empty")
         }
 
-        // Branch: corner case (no checkboxes, freeform only) → save with
-        // empty categories, redirect to /onboarding/loading. The LLM parse
-        // runs in the Task and populates categories + excluded_categories.
-        // Once categories non-empty, the loading page redirects to /.
-        //
-        // Common case (≥1 checkbox) → save categories synchronously, redirect
-        // to / immediately. LLM parse + rescore + catchup run in the Task.
-        let isCornerCase = categories.isEmpty && !trimmedFreeform.isEmpty
-
-        let initialCategories = categories  // empty for corner case, picks for common
+        // Save the user's explicit categories + the composed blurb
+        // synchronously. Reset inferred + excluded to empty pending the
+        // LLM parse below. Whether or not freeform is present, this is
+        // the source-of-truth state at submit time.
         let initialBlurb = composeBlurb(categories: categories, freeform: freeform)
-
         do {
             try await upsertUserProfile(
                 userID: userID,
                 newBlurb: initialBlurb,
-                newCategories: initialCategories,
+                newCategories: categories,
+                newInferredCategories: [],
                 newExcludedCategories: [],
                 on: req
             )
@@ -123,7 +119,8 @@ struct OnboardingController {
             onboardingLog(req, "onboarding/submit: upsertUserProfile failed for \(user.email): \(String(reflecting: error))", level: .error)
             throw error
         }
-        onboardingLog(req, "onboarding/submit: success for \(user.email) cornerCase=\(isCornerCase)")
+        let willRunLLMParse = !trimmedFreeform.isEmpty
+        onboardingLog(req, "onboarding/submit: success for \(user.email) llmParse=\(willRunLLMParse)")
 
         // Fire-and-forget per-user LLM rerank so the user starts seeing
         // personalized cards within a few minutes instead of waiting for the
@@ -136,13 +133,16 @@ struct OnboardingController {
             await OnboardingFileLogger.shared.append(msg, level: "info")
         }
         Task.detached {
-            await tlog("post-onboard pipeline: starting for \(email) cornerCase=\(isCornerCase)")
+            await tlog("post-onboard pipeline: starting for \(email) llmParse=\(willRunLLMParse)")
 
-            // Phase 0 (corner case only): LLM-parse the freeform body to
-            // extract include/exclude category lists. Update user_profiles
-            // with the parsed lists. After this completes, the loading
-            // page's poll will see non-empty categories and redirect.
-            if isCornerCase {
+            // Phase 0: LLM-parse the freeform body whenever it's non-empty,
+            // regardless of whether the user also picked checkboxes. The
+            // result lands in `inferred_categories` (separate from `categories`)
+            // so the form's checkbox state continues to reflect ONLY the
+            // user's explicit selection — no false-positive ticks. Excluded
+            // categories from negative phrases ("no politics") still go in
+            // excluded_categories.
+            if willRunLLMParse {
                 let chatModel = Environment.get("OLLAMA_CHAT_MODEL") ?? "qwen2.5:7b"
                 let ollama = OllamaClient(client: app.client)
                 let parsed = await parseFreeformInterests(
@@ -150,22 +150,14 @@ struct OnboardingController {
                     ollama: ollama,
                     model: chatModel
                 )
-                let resolvedInclude = parsed.include.isEmpty
-                    ? Array(["tech", "politics", "world", "culture", "business", "science", "sports"])  // fallback
-                    : parsed.include
-                await tlog("post-onboard parse: \(email) include=\(resolvedInclude) exclude=\(parsed.exclude) (fallback=\(parsed.include.isEmpty))")
+                await tlog("post-onboard parse: \(email) inferred=\(parsed.include) exclude=\(parsed.exclude)")
 
-                // Re-compose blurb against the parsed categories so the
-                // structured prefix is correct. Use the application-scoped
-                // request-less path: open a one-shot client + db, write
-                // directly via raw SQL.
                 guard let sql = app.db as? any SQLDatabase else {
                     await OnboardingFileLogger.shared.append(
                         "post-onboard parse: \(email) failed — no SQL database", level: "error"
                     )
                     return
                 }
-                let newBlurb = composeBlurb(categories: resolvedInclude, freeform: trimmedFreeform)
                 let escapeArr: ([String]) -> String = { values in
                     let escaped = values.map { "'\($0.replacingOccurrences(of: "'", with: "''"))'" }
                         .joined(separator: ",")
@@ -174,13 +166,11 @@ struct OnboardingController {
                 do {
                     try await sql.raw("""
                         UPDATE user_profiles
-                        SET blurb = \(bind: newBlurb),
-                            categories          = \(unsafeRaw: escapeArr(resolvedInclude)),
-                            excluded_categories = \(unsafeRaw: escapeArr(parsed.exclude)),
-                            updated_at = NOW()
+                        SET inferred_categories = \(unsafeRaw: escapeArr(parsed.include)),
+                            excluded_categories = \(unsafeRaw: escapeArr(parsed.exclude))
                         WHERE user_id = \(bind: userID)
                         """).run()
-                    await tlog("post-onboard parse: \(email) saved new categories")
+                    await tlog("post-onboard parse: \(email) saved inferred + excluded")
                 } catch {
                     await OnboardingFileLogger.shared.append(
                         "post-onboard parse: \(email) DB update failed: \(String(reflecting: error))", level: "error"

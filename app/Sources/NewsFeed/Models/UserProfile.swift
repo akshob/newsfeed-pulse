@@ -11,10 +11,14 @@ final class UserProfile: Model, @unchecked Sendable {
     @Parent(key: "user_id") var user: User
     @Field(key: "blurb") var blurb: String
     /// Categories the user explicitly selected via checkboxes — source of
-    /// truth for filtering. Replaces the prior substring-match-the-blurb
-    /// approach which was prone to false positives ("no politics" → tick
-    /// politics).
+    /// truth for explicit intent. Stays empty if the user submitted the
+    /// onboarding form without ticking anything.
     @OptionalField(key: "categories") var categories: [String]?
+    /// Categories the LLM inferred from the freeform body. Kept separate
+    /// from `categories` so the onboarding form doesn't false-positive-
+    /// tick checkboxes for inferred topics; tags are rendered as a
+    /// distinct row instead. Filter logic unions both arrays.
+    @OptionalField(key: "inferred_categories") var inferredCategories: [String]?
     /// Categories the LLM extracted from the freeform body that the user
     /// wants excluded ("skip startup pitches" → exclude tech). Filtered
     /// out of feed even if the source's categories overlap with selected.

@@ -28,6 +28,7 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(AddDupOfItemIdToItemScores())
     app.migrations.add(CreateUserItemScores())
     app.migrations.add(AddCategoriesToProfiles())
+    app.migrations.add(AddInferredCategoriesToProfiles())
 
     // Auth-related migrations (Phase 1 auth)
     app.migrations.add(CreateUsers())

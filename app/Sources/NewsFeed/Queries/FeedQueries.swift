@@ -74,7 +74,10 @@ func loadRankedFeed(
           SELECT embedding FROM user_profiles WHERE user_id = \(bind: userID) LIMIT 1
         ),
         user_cats AS (
-          SELECT COALESCE(categories, '{}')::TEXT[] AS cats,
+          -- Union of explicit checkbox picks and LLM-inferred categories
+          -- from freeform — the user gets content matching either signal.
+          SELECT COALESCE(categories, '{}')::TEXT[]
+                   || COALESCE(inferred_categories, '{}')::TEXT[] AS cats,
                  COALESCE(excluded_categories, '{}')::TEXT[] AS excluded
           FROM user_profiles WHERE user_id = \(bind: userID) LIMIT 1
         )
