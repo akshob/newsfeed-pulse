@@ -5,11 +5,11 @@
   { "name": "Quanta Magazine",     "url": "https://www.quantamagazine.org/feed/",                        "lane": "tech",         "categories": ["science", "tech"] },
   { "name": "Axios",               "url": "https://www.axios.com/feeds/feed.rss",                        "lane": "conversation", "categories": ["politics", "business", "world"] },
   { "name": "Politico Playbook",   "url": "https://www.politico.com/rss/playbook.xml",                   "lane": "conversation", "categories": ["politics"] },
-  { "name": "NPR",                 "url": "https://feeds.npr.org/1001/rss.xml",                          "lane": "conversation", "categories": ["world", "politics", "culture", "science"] },
+  { "name": "NPR",                 "url": "https://feeds.npr.org/1001/rss.xml",                          "lane": "conversation", "categories": ["world", "politics", "culture", "science", "health"] },
   { "name": "BBC World",           "url": "https://feeds.bbci.co.uk/news/world/rss.xml",                 "lane": "conversation", "categories": ["world", "politics"] },
   { "name": "Reddit OutOfTheLoop", "url": "https://www.reddit.com/r/OutOfTheLoop/.rss",                  "lane": "conversation", "categories": ["culture", "politics"] },
   { "name": "NYT Politics",        "url": "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml",   "lane": "conversation", "categories": ["politics"] },
   { "name": "NYT Business",        "url": "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",   "lane": "conversation", "categories": ["business"] },
-  { "name": "NYT Health",          "url": "https://rss.nytimes.com/services/xml/rss/nyt/Health.xml",     "lane": "conversation", "categories": ["science"] },
+  { "name": "NYT Health",          "url": "https://rss.nytimes.com/services/xml/rss/nyt/Health.xml",     "lane": "conversation", "categories": ["health"] },
   { "name": "NYT Science",         "url": "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml",    "lane": "conversation", "categories": ["science"] }
 ]

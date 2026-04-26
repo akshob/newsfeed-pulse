@@ -5,13 +5,20 @@ import Vapor
 
 /// Named presets exposed as checkboxes on the onboarding form. Submitted
 /// values are looked up here to produce readable text for the LLM embedding.
+///
+/// `science` and `health` are separate keys (formerly one combined bucket)
+/// — the previous combination made it impossible to express "I want
+/// climate science but skip health stuff", which the LLM parser exposed
+/// as a real user pain point. Source tagging in feeds.json reflects the
+/// split: NYT Health → ["health"], NYT Science → ["science"], etc.
 let interestCategories: [(key: String, label: String, blurb: String)] = [
     ("tech",      "Tech, AI, CS",                                         "Tech, AI, and computer science"),
     ("politics",  "Politics & current events",                             "Politics and current events (help me catch up on context I'm missing)"),
     ("world",     "World news",                                            "World news"),
     ("culture",   "Culture, drama, what people are talking about",         "Culture, human drama, and what people are talking about"),
     ("business",  "Business & finance",                                    "Business and finance"),
-    ("science",   "Science & health",                                      "Science and health"),
+    ("science",   "Science (research, climate, physics)",                  "Science — research, climate, biology, physics, basic discoveries"),
+    ("health",    "Health & medicine",                                     "Health and medicine — public health, breakthroughs, drug news"),
     ("sports",    "Sports (cultural moments only)",                        "Sports (only when it crosses into cultural-event territory)"),
 ]
 
