@@ -43,11 +43,23 @@ struct CaptureSummary {
     let sourceHint: String?
 }
 
-/// Combine the user's interest blurb with their recent captures into a single
-/// text passed to the embedder. Captures bias the user's vector toward what
-/// they've recently mentioned hearing about — closing the "I heard from wife"
-/// loop into ranking.
-func composeUserEmbeddingText(blurb: String, recentCaptures: [CaptureSummary]) -> String {
+/// Kept-items signal: titles of articles the user explicitly marked
+/// `keep`. Blended into the embedding text so user_match drifts toward
+/// the topics they engage with.
+struct KeptSummary {
+    let title: String
+}
+
+/// Combine the user's interest blurb with their recent captures and the
+/// titles of items they've recently kept into a single text passed to the
+/// embedder. Captures bias the user's vector toward what they've recently
+/// mentioned hearing about ("I heard from wife"); kept items bias it
+/// toward what they actually engaged with in-app.
+func composeUserEmbeddingText(
+    blurb: String,
+    recentCaptures: [CaptureSummary],
+    recentKept: [KeptSummary] = []
+) -> String {
     var parts: [String] = []
     let trimmedBlurb = blurb.trimmingCharacters(in: .whitespacesAndNewlines)
     if !trimmedBlurb.isEmpty { parts.append(trimmedBlurb) }
@@ -60,6 +72,13 @@ func composeUserEmbeddingText(blurb: String, recentCaptures: [CaptureSummary]) -
             } else {
                 section += "\n- \(line)"
             }
+        }
+        parts.append(section)
+    }
+    if !recentKept.isEmpty {
+        var section = "Items I've kept (positive signals — surface more like these):"
+        for k in recentKept.prefix(20) {
+            section += "\n- \(k.title.replacingOccurrences(of: "\n", with: " "))"
         }
         parts.append(section)
     }
@@ -109,8 +128,10 @@ func upsertUserProfile(
         .all()
         .map { CaptureSummary(content: $0.content, sourceHint: $0.sourceHint) }
 
-    let embedText = composeUserEmbeddingText(blurb: blurb, recentCaptures: captures)
-    contextualLog(req, "upsertUserProfile: embedding text len=\(embedText.count) chars, captures=\(captures.count)")
+    let kept = try await fetchRecentKeptForUser(userID: userID, on: req.db, limit: 20)
+
+    let embedText = composeUserEmbeddingText(blurb: blurb, recentCaptures: captures, recentKept: kept)
+    contextualLog(req, "upsertUserProfile: embedding text len=\(embedText.count) chars, captures=\(captures.count), kept=\(kept.count)")
 
     let ollama = OllamaClient(client: req.client)
     let embedStart = Date()
@@ -174,6 +195,95 @@ func upsertUserProfile(
             """).run()
         contextualLog(req, "upsertUserProfile: inserted new profile for \(userID)")
     }
+}
+
+/// Fetch the titles of items this user has marked `keep` recently. Used as
+/// a positive-signal contribution to the embedding text so cosine similarity
+/// drifts toward what the user actually engages with.
+func fetchRecentKeptForUser(
+    userID: UUID,
+    on db: any Database,
+    limit: Int = 20
+) async throws -> [KeptSummary] {
+    guard let sql = db as? any SQLDatabase else { return [] }
+    struct Row: Decodable { let title: String }
+    let rows = try await sql.raw("""
+        SELECT fi.title AS title
+        FROM engagements e
+        JOIN feed_items fi ON fi.id = e.item_id
+        WHERE e.user_id = \(bind: userID)
+          AND e.event = 'keep'
+          AND e.created_at > NOW() - INTERVAL '30 days'
+        ORDER BY e.created_at DESC
+        LIMIT \(bind: limit)
+        """).all(decoding: Row.self)
+    return rows.map { KeptSummary(title: $0.title) }
+}
+
+/// Application-context (no Request) version of the embedding refresh used
+/// by `upsertUserProfile`. Called from background Tasks (e.g.
+/// EngageController fires this after a `keep` event) where the
+/// originating Request has already returned.
+///
+/// Reads blurb + recent captures + recent keeps, composes the embedding
+/// text, calls the embedder, and writes the new vector back. Bumps
+/// updated_at so user_item_scores get rescored on the next score run
+/// (the LLM-derived relevance text becomes stale once the embedding
+/// drifts).
+func evolveUserEmbedding(
+    userID: UUID,
+    application: Application,
+    logger: Logger
+) async throws {
+    guard let sql = application.db as? any SQLDatabase else {
+        logger.warning("evolveUserEmbedding: no SQL database for \(userID)")
+        return
+    }
+
+    struct ProfileRow: Decodable { let blurb: String }
+    guard let p = try await sql.raw("""
+        SELECT blurb FROM user_profiles WHERE user_id = \(bind: userID) LIMIT 1
+        """).first(decoding: ProfileRow.self) else {
+        logger.warning("evolveUserEmbedding: no profile for \(userID); skipping")
+        return
+    }
+
+    struct CaptureRow: Decodable {
+        let content: String
+        let source_hint: String?
+    }
+    let captureRows = try await sql.raw("""
+        SELECT content, source_hint FROM captures
+        WHERE user_id = \(bind: userID)
+        ORDER BY captured_at DESC
+        LIMIT 20
+        """).all(decoding: CaptureRow.self)
+    let captures = captureRows.map {
+        CaptureSummary(content: $0.content, sourceHint: $0.source_hint)
+    }
+
+    let kept = try await fetchRecentKeptForUser(userID: userID, on: application.db, limit: 20)
+
+    let embedText = composeUserEmbeddingText(blurb: p.blurb, recentCaptures: captures, recentKept: kept)
+    let ollama = OllamaClient(client: application.client)
+    let started = Date()
+    let embedding: [Double]
+    do {
+        embedding = try await ollama.embed(text: embedText)
+    } catch {
+        logger.error("evolveUserEmbedding: embed failed for \(userID): \(error)")
+        throw error
+    }
+    let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+
+    try await sql.raw("""
+        UPDATE user_profiles
+        SET embedding = \(unsafeRaw: "'\(pgvectorLiteral(embedding))'::vector"),
+            updated_at = NOW()
+        WHERE user_id = \(bind: userID)
+        """).run()
+
+    logger.info("evolveUserEmbedding: \(userID) embedded in \(elapsed)ms (captures=\(captures.count) kept=\(kept.count))")
 }
 
 /// Strip the structured "Interested in: ..." prefix line from a stored blurb
