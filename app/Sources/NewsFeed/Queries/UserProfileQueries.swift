@@ -63,13 +63,23 @@ func composeUserEmbeddingText(blurb: String, recentCaptures: [CaptureSummary]) -
 ///
 /// - If `newBlurb` is supplied (onboarding form submit), the blurb is replaced.
 ///   Otherwise the existing blurb is preserved.
+/// - If `newCategories` is supplied, the explicit category array is replaced.
+///   Existing categories preserved otherwise.
+/// - `newExcludedCategories` follows the same shape (LLM-parsed exclusions
+///   from the freeform body; nil = preserve existing).
 /// - The embedding is always recomputed from blurb + recent captures so the
 ///   user's vector drifts toward their recent "heard from..." inputs.
-func upsertUserProfile(userID: UUID, newBlurb: String? = nil, on req: Request) async throws {
+func upsertUserProfile(
+    userID: UUID,
+    newBlurb: String? = nil,
+    newCategories: [String]? = nil,
+    newExcludedCategories: [String]? = nil,
+    on req: Request
+) async throws {
     guard let sql = req.db as? any SQLDatabase else {
         throw Abort(.internalServerError, reason: "expected SQLDatabase")
     }
-    contextualLog(req, "upsertUserProfile: user=\(userID) hasNewBlurb=\(newBlurb != nil)")
+    contextualLog(req, "upsertUserProfile: user=\(userID) hasNewBlurb=\(newBlurb != nil) cats=\(newCategories?.count ?? -1) excludes=\(newExcludedCategories?.count ?? -1)")
 
     let existing = try await UserProfile.query(on: req.db)
         .filter(\.$user.$id == userID).first()
@@ -105,24 +115,60 @@ func upsertUserProfile(userID: UUID, newBlurb: String? = nil, on req: Request) a
     }
     contextualLog(req, "upsertUserProfile: embedded in \(Int(Date().timeIntervalSince(embedStart)*1000))ms, dim=\(embedding.count)")
 
+    // Build TEXT[] literals for any provided new categories. Pass-through nil
+    // means "don't touch existing column" — the SET clause then omits those.
+    func arrayLiteral(_ values: [String]) -> String {
+        let escaped = values.map { "'\($0.replacingOccurrences(of: "'", with: "''"))'" }.joined(separator: ",")
+        return "ARRAY[\(escaped)]::TEXT[]"
+    }
+    var categoryAssign = ""
+    if let newCategories = newCategories {
+        categoryAssign = ", categories = \(arrayLiteral(newCategories))"
+    }
+    var excludesAssign = ""
+    if let newExcluded = newExcludedCategories {
+        excludesAssign = ", excluded_categories = \(arrayLiteral(newExcluded))"
+    }
+
     if let existing = existing, let existingID = existing.id {
         try await sql.raw("""
             UPDATE user_profiles
             SET blurb = \(bind: blurb),
                 embedding = \(unsafeRaw: "'\(pgvectorLiteral(embedding))'::vector"),
                 updated_at = NOW()
+                \(unsafeRaw: categoryAssign)
+                \(unsafeRaw: excludesAssign)
             WHERE id = \(bind: existingID)
             """).run()
         contextualLog(req, "upsertUserProfile: updated existing profile \(existingID)")
     } else {
+        // INSERT path: brand-new profile row. Always include both arrays
+        // (default to empty rather than omit so the NOT NULL DEFAULT '{}'
+        // takes effect predictably).
+        let insertCats = newCategories ?? []
+        let insertExcludes = newExcludedCategories ?? []
         try await sql.raw("""
-            INSERT INTO user_profiles (id, user_id, blurb, embedding, updated_at)
+            INSERT INTO user_profiles (id, user_id, blurb, embedding, categories, excluded_categories, updated_at)
             VALUES (\(bind: UUID()),
                     \(bind: userID),
                     \(bind: blurb),
                     \(unsafeRaw: "'\(pgvectorLiteral(embedding))'::vector"),
+                    \(unsafeRaw: arrayLiteral(insertCats)),
+                    \(unsafeRaw: arrayLiteral(insertExcludes)),
                     NOW())
             """).run()
         contextualLog(req, "upsertUserProfile: inserted new profile for \(userID)")
     }
+}
+
+/// Strip the structured "Interested in: ..." prefix line from a stored blurb
+/// so the textarea on /onboarding shows only what the user actually typed.
+/// Convention: composeBlurb produces "Interested in: ...\n\n<freeform>" when
+/// categories are non-empty.
+func freeformPart(of blurb: String) -> String {
+    let chunks = blurb.components(separatedBy: "\n\n")
+    return chunks
+        .filter { !$0.hasPrefix("Interested in:") }
+        .joined(separator: "\n\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
 }

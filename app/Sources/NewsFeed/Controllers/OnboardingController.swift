@@ -13,19 +13,26 @@ struct OnboardingController {
         let user = try req.auth.require(User.self)
         let profile = try await UserProfile.query(on: req.db)
             .filter(\.$user.$id == user.requireID()).first()
+        let cats = profile?.categories ?? []
+        let freeform = profile.map { freeformPart(of: $0.blurb) } ?? ""
         return htmlResponse(OnboardingView.render(
             email: user.email,
-            currentBlurb: profile?.blurb,
+            currentCategories: cats,
+            currentFreeform: freeform,
             message: try? req.query.get(String.self, at: "msg"),
             error: try? req.query.get(String.self, at: "err")
         ))
     }
 
-    // POST /onboarding — persist categories + blurb as an embedded user_profile.
+    // POST /onboarding — persist categories + freeform as an embedded user_profile.
+    // Phase 1 of the redesign: store `categories` explicitly (no more
+    // substring-matching the blurb to derive checkbox state). The blurb
+    // column still holds composed text for the embedder. LLM-parse of the
+    // freeform body for excluded_categories ships in Phase 2.
     func onboardingSubmit(req: Request) async throws -> Response {
         struct Form: Content {
             var categories: [String]?
-            var blurb: String?
+            var freeform: String?
         }
         req.isOnboardingContext = true
         let user = try req.auth.require(User.self)
@@ -39,14 +46,25 @@ struct OnboardingController {
             onboardingLog(req, "onboarding/submit: form decode failed: \(String(reflecting: error))", level: .error)
             throw error
         }
-        let blurb = composeBlurb(categories: form.categories ?? [], freeform: form.blurb ?? "")
-        onboardingLog(req, "onboarding/submit: composed blurb len=\(blurb.count) categories=\(form.categories ?? [])")
+        let categories = form.categories ?? []
+        let freeform = form.freeform ?? ""
+        let blurb = composeBlurb(categories: categories, freeform: freeform)
+        onboardingLog(req, "onboarding/submit: composed blurb len=\(blurb.count) categories=\(categories) freeformLen=\(freeform.count)")
 
         guard !blurb.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return req.redirect(to: "/onboarding?err=empty")
         }
         do {
-            try await upsertUserProfile(userID: userID, newBlurb: blurb, on: req)
+            try await upsertUserProfile(
+                userID: userID,
+                newBlurb: blurb,
+                newCategories: categories,
+                // Phase 2 will parse freeform with the LLM and replace this.
+                // For now an empty array is fine — feed query treats absent
+                // exclusions as "no exclusions."
+                newExcludedCategories: [],
+                on: req
+            )
         } catch {
             onboardingLog(req, "onboarding/submit: upsertUserProfile failed for \(user.email): \(String(reflecting: error))", level: .error)
             throw error

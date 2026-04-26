@@ -1,15 +1,26 @@
 import Foundation
 
 enum OnboardingView {
-    static func render(email: String, currentBlurb: String?, message: String?, error: String?) -> String {
+    /// Renders the onboarding form. Checkbox state comes from
+    /// `currentCategories` (explicit array on user_profiles), not from
+    /// substring-matching the blurb — that approach false-positive-ticked
+    /// any category whose name appeared in the freeform text (e.g. "no
+    /// politics" → politics ticked).
+    static func render(
+        email: String,
+        currentCategories: [String],
+        currentFreeform: String,
+        message: String?,
+        error: String?
+    ) -> String {
         let flash: String = {
             if error == "empty" { return "<div class=\"flash err\">Add at least one category or a sentence of interests.</div>" }
             return ""
         }()
-        let blurbText = currentBlurb ?? ""
-        let lowered = blurbText.lowercased()
+
+        let selected = Set(currentCategories)
         let categoryItems = interestCategories.map { cat -> String in
-            let isChecked = lowered.contains(cat.key) ? " checked" : ""
+            let isChecked = selected.contains(cat.key) ? " checked" : ""
             return "            <label><input type=\"checkbox\" name=\"categories\" value=\"\(cat.key)\"\(isChecked)> \(cat.label)</label>"
         }.joined(separator: "\n")
 
@@ -35,7 +46,7 @@ enum OnboardingView {
         \(categoryItems)
               </fieldset>
               <label>Tell me more — what to stay on, what to skip
-                <textarea name="blurb" rows="6" placeholder="Be specific. 'AI/LLM research, developer tooling, help me catch up on political stories where I lack context. Skip: tech company PR, cycle-of-the-day political noise.'">\(htmlEscape(blurbText))</textarea>
+                <textarea name="freeform" rows="6" placeholder="Be specific. 'AI/LLM research, developer tooling, help me catch up on political stories where I lack context. Skip: tech company PR, cycle-of-the-day political noise.'">\(htmlEscape(currentFreeform))</textarea>
               </label>
               <button type="submit">Save and continue</button>
             </form>
