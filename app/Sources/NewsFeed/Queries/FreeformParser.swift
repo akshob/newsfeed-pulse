@@ -43,12 +43,12 @@ func parseFreeformInterests(
 
     let user = """
     Available category keys (use these exact strings):
-      tech       — software, AI, dev tooling, computer science
-      politics   — elections, policy, partisan stories
-      world      — geopolitics, international news outside the user's country
-      culture    — drama, public figures, social moments, entertainment
-      business   — markets, deals, company news, finance
-      science    — research, health, medicine, climate
+      tech       — software, AI, LLMs, dev tooling, computer science, programming
+      politics   — elections, policy, partisan stories, government
+      world      — geopolitics, international news, wars, foreign affairs
+      culture    — drama, celebrities, public figures, social moments, entertainment
+      business   — markets, stocks, deals, company news, economy, finance
+      science    — research, health, medicine, climate, physics, biology
       sports     — only when crossing into cultural-event territory
 
     User's free-text description:
@@ -56,13 +56,25 @@ func parseFreeformInterests(
     \(trimmed)
     \"\"\"
 
-    Rules:
-    - "include" is categories they explicitly say they want. If they only \
-      mention something neutrally, do NOT include.
-    - "exclude" is categories they say they DON'T want — words like "no", \
-      "skip", "not interested", "avoid".
-    - If a category isn't mentioned at all, it appears in NEITHER list.
-    - Don't invent keys; only use the 7 listed above.
+    For each of the 7 categories decide:
+    - INCLUDE: user mentions a topic, field, technology, or example that \
+      maps to this category. Be reasonably generous — listing a topic is \
+      itself a signal of interest.
+    - EXCLUDE: user uses negative language ("no", "skip", "avoid", "not \
+      interested in", "boring", "hate") about this category.
+    - NEITHER: category isn't mentioned at all.
+
+    Worked examples:
+      "AI/LLM research, climate science, no politics"
+        → {"include": ["tech", "science"], "exclude": ["politics"]}
+      "want stocks and election coverage; skip celebrity drama"
+        → {"include": ["business", "politics"], "exclude": ["culture"]}
+      "geopolitics and wars please, nothing about sports"
+        → {"include": ["world"], "exclude": ["sports"]}
+      "I love medical breakthroughs and Supreme Court news"
+        → {"include": ["science", "politics"], "exclude": []}
+
+    Use ONLY the 7 keys above. Don't invent new keys.
 
     Return ONLY: {"include": ["..."], "exclude": ["..."]}
     """
