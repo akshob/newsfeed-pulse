@@ -10,16 +10,43 @@ struct OnboardingController {
         routes.get("onboarding", "loading", use: self.onboardingLoading)
     }
 
-    /// Polling target for the corner case: user submitted onboarding with
-    /// NO categories ticked, only freeform — the LLM is parsing in the
-    /// background. We meta-refresh this page every 2s; once
-    /// user_profiles.categories is non-empty (parse done), redirect to /.
+    /// Polling target shown after every onboarding submit. Meta-refreshes
+    /// every 2s; redirects to / once either:
+    ///   - the user has at least 1 user_item_scores row freshly written
+    ///     against their current profile (rescoreUser progress threshold —
+    ///     guarantees the top of the feed has personalized card text), OR
+    ///   - more than 30s have passed since the profile update (safety
+    ///     timeout so a slow / failing background pipeline never traps
+    ///     the user).
+    ///
+    /// Freshness via `scored_at >= profile.updated_at` — also covers the
+    /// re-onboard case where stale rows exist from a previous blurb.
     func onboardingLoading(req: Request) async throws -> Response {
         let user = try req.auth.require(User.self)
-        let profile = try await UserProfile.query(on: req.db)
-            .filter(\.$user.$id == user.requireID()).first()
-        let cats = profile?.categories ?? []
-        if !cats.isEmpty {
+        let userID = try user.requireID()
+        guard let sql = req.db as? any SQLDatabase else {
+            return req.redirect(to: "/?msg=interests_saved")
+        }
+        struct StatusRow: Decodable {
+            let fresh_scores: Int
+            let seconds_since_update: Double?
+        }
+        let row = try await sql.raw("""
+            WITH p AS (
+              SELECT updated_at FROM user_profiles
+              WHERE user_id = \(bind: userID) LIMIT 1
+            )
+            SELECT
+              COALESCE((
+                SELECT COUNT(*)::int FROM user_item_scores uis
+                WHERE uis.user_id = \(bind: userID)
+                  AND uis.scored_at >= (SELECT updated_at FROM p)
+              ), 0) AS fresh_scores,
+              EXTRACT(EPOCH FROM (NOW() - (SELECT updated_at FROM p)))::float AS seconds_since_update
+            """).first(decoding: StatusRow.self)
+        let freshScores = row?.fresh_scores ?? 0
+        let elapsed = row?.seconds_since_update ?? 999
+        if freshScores >= 1 || elapsed > 30 {
             return req.redirect(to: "/?msg=interests_saved")
         }
         return htmlResponse(OnboardingLoadingView.render(email: user.email))
@@ -202,10 +229,11 @@ struct OnboardingController {
             }
         }
 
-        // Corner case → loading page (Task above will populate categories,
-        // poller redirects once that's done). Common case → straight to feed.
-        return isCornerCase
-            ? req.redirect(to: "/onboarding/loading")
-            : req.redirect(to: "/?msg=interests_saved")
+        // Always route through the loading page so the user lands on a
+        // ranked feed (≥1 fresh user_item_scores row) instead of one
+        // showing global fallback text on top items. Loading page redirects
+        // to / as soon as rescoreUser writes the first per-user row, or
+        // after a 30s safety timeout.
+        return req.redirect(to: "/onboarding/loading")
     }
 }
