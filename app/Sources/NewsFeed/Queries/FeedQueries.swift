@@ -61,9 +61,22 @@ func loadRankedFeed(
         ? "ORDER BY \(scoreExpr) DESC NULLS LAST, fi.published_at DESC NULLS LAST"
         : "ORDER BY fi.published_at DESC NULLS LAST, fi.fetched_at DESC"
 
+    // Hard category filter via Postgres array overlap (`&&`):
+    //   - source.categories ∩ user.categories must be non-empty (unless
+    //     user.categories is empty — first-onboarding fallback shows all)
+    //   - source.categories ∩ user.excluded_categories must be empty
+    //
+    // Falls back gracefully when categories columns are NULL (older rows),
+    // when source has no categories tagged (treated as "matches anything"),
+    // and when user has no profile yet.
     return try await sql.raw("""
         WITH user_emb AS (
           SELECT embedding FROM user_profiles WHERE user_id = \(bind: userID) LIMIT 1
+        ),
+        user_cats AS (
+          SELECT COALESCE(categories, '{}')::TEXT[] AS cats,
+                 COALESCE(excluded_categories, '{}')::TEXT[] AS excluded
+          FROM user_profiles WHERE user_id = \(bind: userID) LIMIT 1
         )
         SELECT fi.id AS id,
                fi.title AS title,
@@ -87,6 +100,14 @@ func loadRankedFeed(
         LEFT JOIN user_item_scores uis
           ON uis.item_id = fi.id AND uis.user_id = \(bind: userID)
         WHERE isc.dup_of_item_id IS NULL
+          AND (
+            -- Empty user.cats = "no opinion yet" → show everything (treat
+            -- like a default/anonymous user). Otherwise require source
+            -- overlap.
+            cardinality((SELECT cats FROM user_cats)) = 0
+            OR fs.categories && (SELECT cats FROM user_cats)
+          )
+          AND NOT (fs.categories && (SELECT excluded FROM user_cats))
           AND (
             SELECT event FROM engagements eng2
               WHERE eng2.item_id = fi.id AND eng2.user_id = \(bind: userID)

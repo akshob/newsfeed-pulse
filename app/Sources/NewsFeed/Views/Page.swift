@@ -9,8 +9,9 @@ func htmlResponse(_ html: String) -> Response {
 
 /// The shared HTML shell: doctype, head, CSS, HTMX script, body, runtime JS.
 /// All view renderers use this — keeping it in one place means CSS changes
-/// hit everything.
-func page(title: String, body: String) -> String {
+/// hit everything. `extraHead` lets per-page bits (e.g. a meta-refresh on the
+/// onboarding loading page) inject into <head> without forking the shell.
+func page(title: String, body: String, extraHead: String = "") -> String {
     """
     <!DOCTYPE html>
     <html lang="en">
@@ -21,6 +22,7 @@ func page(title: String, body: String) -> String {
       <title>\(htmlEscape(title))</title>
       <link rel="icon" type="image/svg+xml" href="/favicon.svg">
       <link rel="apple-touch-icon" href="/favicon.svg">
+      \(extraHead)
       <style>\(pageCSS)</style>
       <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     </head>
