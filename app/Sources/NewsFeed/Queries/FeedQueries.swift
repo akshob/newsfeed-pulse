@@ -111,11 +111,14 @@ func loadRankedFeed(
             OR fs.categories && (SELECT cats FROM user_cats)
           )
           AND NOT (fs.categories && (SELECT excluded FROM user_cats))
-          AND (
-            SELECT event FROM engagements eng2
-              WHERE eng2.item_id = fi.id AND eng2.user_id = \(bind: userID)
-              ORDER BY eng2.created_at DESC LIMIT 1
-          ) IS DISTINCT FROM 'skip'
+          -- Hide anything the user has engaged with at all: clicking the
+          -- card to read the catchup panel records a `view`, so any prior
+          -- `view` / `keep` / `skip` event drops it from the feed. Fresh
+          -- items only.
+          AND NOT EXISTS (
+            SELECT 1 FROM engagements eng2
+            WHERE eng2.item_id = fi.id AND eng2.user_id = \(bind: userID)
+          )
         \(unsafeRaw: orderClause)
         LIMIT \(bind: limit)
         """).all(decoding: RankedRow.self)
