@@ -44,6 +44,7 @@ public func configure(_ app: Application) async throws {
     app.asyncCommands.use(ScoreCommand(), as: "score")
     app.asyncCommands.use(CatchupAllCommand(), as: "catchup-all")
     app.asyncCommands.use(CatchupCommand(), as: "catchup")
+    app.asyncCommands.use(RedoDedupCommand(), as: "redo-dedup")
     app.asyncCommands.use(CreateInviteCommand(), as: "create-invite")
     app.asyncCommands.use(ReleaseInviteCommand(), as: "release-invite")
 

@@ -28,10 +28,10 @@ struct DedupRulesTests {
 
     @Test func customThresholdIsHonored() {
         let canon = UUID()
-        // Tighter threshold rejects a 0.07 match that the default would accept.
-        #expect(canonicalIDFromNeighbors([(canon, 0.07)], threshold: 0.05) == nil)
-        // Looser threshold accepts a 0.20 match the default would reject.
-        #expect(canonicalIDFromNeighbors([(canon, 0.20)], threshold: 0.25) == canon)
+        // Tighter threshold rejects a 0.10 match that the default (0.15) would accept.
+        #expect(canonicalIDFromNeighbors([(canon, 0.10)], threshold: 0.05) == nil)
+        // Looser threshold accepts a 0.25 match the default would reject.
+        #expect(canonicalIDFromNeighbors([(canon, 0.25)], threshold: 0.30) == canon)
     }
 
     @Test func onlyFirstNeighborMatters() {

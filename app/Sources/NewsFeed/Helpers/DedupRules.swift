@@ -3,12 +3,19 @@ import Foundation
 /// Cosine distance threshold below which two items count as the same story.
 /// Calibration with nomic-embed-text on news title+lead pairs:
 ///   0.00–0.05  same article restated
-///   0.06–0.12  same story, different outlets / paraphrased headline
-///   0.15–0.30  same topic, different angle
+///   0.06–0.14  same story, different outlets / paraphrased headline + different lede
+///   0.15–0.30  same topic, different angle (e.g. "AI funding boom" + "AI bubble fears")
 ///   0.30+      unrelated
-/// 0.08 keeps wire-service syndications and obvious paraphrases together
-/// without collapsing genuinely different angles on the same topic.
-let DUP_DISTANCE_THRESHOLD: Double = 0.08
+///
+/// Bumped from 0.08 to 0.15 after real-user feedback caught two
+/// obvious-same-story pairs that weren't clustering: NYT vs NPR on
+/// the Musk-Altman court case, and Ars vs NYT on the China-Meta-Manus
+/// regulatory block. Both pairs read as paraphrased same-story to a
+/// human; 0.08 was treating them as different stories. 0.15 is at the
+/// edge of the same-story / same-topic boundary — slight risk of
+/// collapsing two angles on a hot topic, but worth it for the much
+/// cleaner feed when wire stories propagate across outlets.
+let DUP_DISTANCE_THRESHOLD: Double = 0.15
 
 /// How far back to scan for a cluster head. Beyond this, restatements get to
 /// surface again — recurring stories don't deserve to be silenced forever.
